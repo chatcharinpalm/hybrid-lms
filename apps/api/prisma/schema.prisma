@@ -1,0 +1,270 @@
+// Hybrid LMS — Core Data Model
+//
+// Points at PostgreSQL for the real deployment (see README's "Deploying"
+// section for the hosted-Postgres setup). Local dev during this project's
+// build phase ran on SQLite instead, because this machine's Application
+// Control policy blocks running a standalone Postgres server process
+// (Prisma's own query engine loads in-process and wasn't affected, which is
+// why Prisma-backed dev was possible here at all). Enum/Json/scalar-list
+// fields below are still modeled as plain `String` columns (JSON-encoded
+// where noted) rather than switched to Postgres's native equivalents,
+// because that's what the SQLite phase required and switching back is a
+// cosmetic-only change — see apps/api/src/constants.ts for the string-union
+// TypeScript types these map to. To run this against local SQLite again
+// (e.g. on a machine without Postgres access), change `provider` below back
+// to "sqlite" and point DATABASE_URL at a "file:./dev.db"-style path.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────────────────────────
+// Identity & Roles
+// ─────────────────────────────────────────────────────────────
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String
+  firstName     String
+  lastName      String
+  fullName      String   // kept for display/search convenience; derived as "firstName lastName" at signup
+  role          String   @default("STUDENT") // Role: ADMIN | TEACHER | STUDENT
+  studentCode   String?  @unique // e.g. university/enrollment ID — required for student self-registration
+  faculty       String? // e.g. คณะวิศวกรรมศาสตร์ — required for student self-registration
+  major         String? // e.g. วิศวกรรมคอมพิวเตอร์ — required for student self-registration
+  avatarUrl     String?
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  coursesTaught     Course[]           @relation("CourseTeacher")
+  enrollments       Enrollment[]
+  examAttempts      ExamAttempt[]
+  attendanceRecords AttendanceRecord[]
+  materialsUploaded CourseMaterial[]
+  auditLogs         AuditLog[]
+
+  @@index([role])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Hybrid Class Management
+// ─────────────────────────────────────────────────────────────
+
+model Course {
+  id          String   @id @default(uuid())
+  code        String   @unique // e.g. CPE-321
+  title       String
+  description String?
+  termLabel   String? // e.g. 2/2567
+  teacherId   String
+  teacher     User     @relation("CourseTeacher", fields: [teacherId], references: [id])
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  enrollments Enrollment[]
+  sessions    ClassSession[]
+  materials   CourseMaterial[]
+  exams       Exam[]
+}
+
+model Enrollment {
+  id        String   @id @default(uuid())
+  courseId  String
+  studentId String
+  status    String   @default("ACTIVE") // ACTIVE | DROPPED | COMPLETED
+  createdAt DateTime @default(now())
+
+  course  Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  student User   @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([courseId, studentId])
+}
+
+// A single scheduled class meeting, hybrid: onsite room + online link
+model ClassSession {
+  id            String   @id @default(uuid())
+  courseId      String
+  title         String
+  startsAt      DateTime
+  endsAt        DateTime
+  onsiteRoom    String? // e.g. "Building 402"
+  onlineJoinUrl String? // e.g. Teams/Zoom link
+  qrSecret      String? // rotating-QR seed for onsite check-in (see AttendanceRecord)
+  createdAt     DateTime @default(now())
+
+  course      Course             @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  attendances AttendanceRecord[]
+
+  @@index([courseId, startsAt])
+}
+
+model AttendanceRecord {
+  id          String   @id @default(uuid())
+  sessionId   String
+  studentId   String
+  method      String // AttendanceMethod: QR_ONSITE | ONLINE_JOIN | MANUAL
+  checkedInAt DateTime @default(now())
+  ipAddress   String?
+  metadata    String? // JSON-encoded, e.g. { token, deviceInfo }
+
+  session ClassSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  student User         @relation(fields: [studentId], references: [id], onDelete: Cascade)
+
+  @@unique([sessionId, studentId])
+}
+
+model CourseMaterial {
+  id         String   @id @default(uuid())
+  courseId   String
+  uploaderId String
+  title      String
+  type       String // MaterialType: SLIDE | VIDEO | DOCUMENT | LINK
+  fileUrl    String // storage path or external URL
+  sizeBytes  Int?
+  createdAt  DateTime @default(now())
+
+  course   Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  uploader User   @relation(fields: [uploaderId], references: [id])
+
+  @@index([courseId])
+}
+
+// ─────────────────────────────────────────────────────────────
+// Secure Exam Engine
+// ─────────────────────────────────────────────────────────────
+
+model Exam {
+  id               String    @id @default(uuid())
+  courseId         String
+  title            String
+  description      String?
+  durationMinutes  Int
+  passScorePercent Int       @default(60)
+  maxAttempts      Int       @default(1)
+  status           String    @default("DRAFT") // ExamStatus: DRAFT | SCHEDULED | OPEN | CLOSED
+  opensAt          DateTime?
+  closesAt         DateTime?
+
+  // Lockdown / anti-cheat configuration
+  requireFullscreen Boolean @default(true)
+  blockClipboard    Boolean @default(true)
+  blockContextMenu  Boolean @default(true)
+  maxViolations     Int     @default(3) // auto-submit threshold
+  shuffleQuestions  Boolean @default(true)
+  shuffleOptions    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  course    Course        @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  questions Question[]
+  attempts  ExamAttempt[]
+
+  @@index([courseId])
+}
+
+model Question {
+  id     String @id @default(uuid())
+  examId String
+  type   String @default("SINGLE_CHOICE") // QuestionType: SINGLE_CHOICE | MULTIPLE_CHOICE | SHORT_ANSWER
+  prompt String
+  points Int    @default(1)
+  order  Int    @default(0) // authoring order (randomized at attempt time)
+  // For SHORT_ANSWER, exact/normalized match or hash comparison
+  answerKey String?
+
+  exam    Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
+  options QuestionOption[]
+
+  @@index([examId])
+}
+
+model QuestionOption {
+  id         String  @id @default(uuid())
+  questionId String
+  label      String
+  isCorrect  Boolean @default(false)
+  order      Int     @default(0)
+
+  question Question @relation(fields: [questionId], references: [id], onDelete: Cascade)
+
+  @@index([questionId])
+}
+
+model ExamAttempt {
+  id             String    @id @default(uuid())
+  examId         String
+  studentId      String
+  status         String    @default("IN_PROGRESS") // AttemptStatus: IN_PROGRESS | SUBMITTED | AUTO_SUBMITTED | GRADED
+  startedAt      DateTime  @default(now())
+  submittedAt    DateTime?
+  scorePoints    Int?
+  scorePercent   Float?
+  passed         Boolean?
+  violationCount Int       @default(0)
+
+  // Per-student randomization seed so question/option order is
+  // reproducible for grading/review but unique per attempt.
+  randomSeed String
+
+  exam       Exam               @relation(fields: [examId], references: [id], onDelete: Cascade)
+  student    User               @relation(fields: [studentId], references: [id], onDelete: Cascade)
+  answers    ExamAnswer[]
+  violations ExamViolationLog[]
+
+  @@index([examId, studentId])
+}
+
+model ExamAnswer {
+  id                String   @id @default(uuid())
+  attemptId         String
+  questionId        String
+  selectedOptionIds String   @default("[]") // JSON-encoded string[], for single/multiple choice
+  textAnswer        String? // for short answer / flag submission
+  isCorrect         Boolean?
+  pointsAwarded     Int?
+  answeredAt        DateTime @default(now())
+
+  attempt ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@unique([attemptId, questionId])
+}
+
+// Anti-cheat violation log — one row per detected event.
+// type is a ViolationType (see constants.ts): TAB_HIDDEN, WINDOW_BLUR,
+// FULLSCREEN_EXIT, COPY_ATTEMPT, PASTE_ATTEMPT, CUT_ATTEMPT,
+// CONTEXT_MENU_ATTEMPT, DEVTOOLS_SHORTCUT, PRINT_SCREEN,
+// MULTIPLE_DISPLAYS_DETECTED
+model ExamViolationLog {
+  id         String   @id @default(uuid())
+  attemptId  String
+  type       String
+  occurredAt DateTime @default(now())
+  detail     String? // JSON-encoded, e.g. { durationMs, key, screenCount }
+
+  attempt ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId, type])
+}
+
+// Generic audit trail for admin/security review
+model AuditLog {
+  id        String   @id @default(uuid())
+  actorId   String?
+  action    String
+  entity    String
+  entityId  String?
+  metadata  String? // JSON-encoded
+  createdAt DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id])
+
+  @@index([entity, entityId])
+}

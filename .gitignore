@@ -1,0 +1,11 @@
+node_modules/
+.next/
+dist/
+build/
+*.log
+.env
+.env.local
+apps/api/uploads/*
+!apps/api/uploads/.gitkeep
+apps/api/prisma/*.db
+apps/api/prisma/*.db-journal

@@ -1,0 +1,43 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html,
+  body {
+    margin: 0;
+    padding: 0;
+    background-color: #0b1326;
+  }
+  body {
+    overscroll-behavior: none;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #060e20;
+}
+::-webkit-scrollbar-thumb {
+  background: #222a3d;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #31394d;
+}
+
+/* ── Exam Lockdown Mode ──────────────────────────────────────────
+   Applied to <body> only while a secure exam session is active
+   (see hooks/useExamSecurity.ts). Keeps selection/drag disabled
+   across the whole document, not just the question panel, so a
+   student can't select text in the browser chrome-adjacent areas. */
+body.exam-lockdown {
+  user-select: none;
+  -webkit-user-select: none;
+}
+body.exam-lockdown img {
+  pointer-events: none;
+}
