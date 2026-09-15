@@ -62,10 +62,15 @@ export async function login(req: Request, res: Response) {
   const accessToken = signAccessToken({ sub: user.id, role: user.role, email: user.email });
   const refreshToken = signRefreshToken({ sub: user.id });
 
+  // In production the frontend (Vercel) and API (Render) are different
+  // origins, so the cookie needs SameSite=None to survive a cross-site
+  // fetch — which in turn requires Secure. Locally (http, same-site
+  // enough) "lax" without Secure is fine and simpler to test with.
+  const isProd = process.env.NODE_ENV === "production";
   res.cookie("refresh_token", refreshToken, {
     httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    sameSite: isProd ? "none" : "lax",
+    secure: isProd,
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 
