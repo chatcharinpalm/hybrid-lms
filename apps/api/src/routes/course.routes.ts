@@ -13,6 +13,7 @@ export const courseRouter = Router();
 
 // Public browsing: course catalog and materials are viewable without login.
 courseRouter.get("/", optionalAuth, courseController.listCourses);
+courseRouter.get("/by-code/:code/instructor", courseController.getCourseInstructor);
 courseRouter.post("/", requireAuth, requireRole("TEACHER", "ADMIN"), courseController.createCourse);
 courseRouter.get("/:courseId/materials", courseController.listMaterials);
 courseRouter.post(

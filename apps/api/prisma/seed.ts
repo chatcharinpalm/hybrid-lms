@@ -26,9 +26,9 @@ async function main() {
     create: {
       email: "teacher@netsechub.dev",
       passwordHash,
-      firstName: "นครินทร์",
-      lastName: "เกียรติศิริกุล",
-      fullName: "อ.ดร. นครินทร์ เกียรติศิริกุล",
+      firstName: "วิทวัส",
+      lastName: "ทิพย์สุวรรณ",
+      fullName: "ดร.วิทวัส ทิพย์สุวรรณ",
       role: "TEACHER",
     },
   });

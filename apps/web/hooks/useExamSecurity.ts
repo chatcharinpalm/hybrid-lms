@@ -21,6 +21,8 @@ export interface UseExamSecurityOptions {
 
 export interface UseExamSecurityResult {
   isFullscreen: boolean;
+  /** True while the exam window is unfocused or its tab is hidden. */
+  isAway: boolean;
   violationCount: number;
   lastViolation: ViolationEvent | null;
   /** Must be called from a user gesture (e.g. the "Start Exam" button click). */
@@ -49,30 +51,38 @@ export function useExamSecurity({
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [violationCount, setViolationCount] = useState(0);
   const [lastViolation, setLastViolation] = useState<ViolationEvent | null>(null);
+  const [isAway, setIsAway] = useState(false);
 
   // Avoid double-counting: entering fullscreen via requestEnterFullscreen
   // triggers a transient blur/visibilitychange in some browsers.
   const suppressUntilRef = useRef(0);
   const configRef = useRef(config);
   configRef.current = config;
+  // Callbacks are read through refs so the listener effect below depends only on
+  // `enabled`. If it re-ran whenever a parent re-rendered (e.g. on every answer),
+  // its cleanup would call exitFullscreen() and silently drop the lockdown.
+  const onViolationRef = useRef(onViolation);
+  onViolationRef.current = onViolation;
+  const onMaxRef = useRef(onMaxViolationsReached);
+  onMaxRef.current = onMaxViolationsReached;
+  const countRef = useRef(0);
 
-  const report = useCallback(
-    (type: ViolationType, detail?: Record<string, unknown>) => {
-      if (Date.now() < suppressUntilRef.current) return;
+  const lastReportAtRef = useRef(0);
 
-      const event: ViolationEvent = { type, at: Date.now(), detail };
-      setLastViolation(event);
-      setViolationCount((prev) => {
-        const next = prev + 1;
-        if (next >= configRef.current.maxViolations) {
-          onMaxViolationsReached?.();
-        }
-        return next;
-      });
-      onViolation(event);
-    },
-    [onViolation, onMaxViolationsReached]
-  );
+  const report = useCallback((type: ViolationType, detail?: Record<string, unknown>) => {
+    if (Date.now() < suppressUntilRef.current) return;
+    // One action often fires several events (switching tabs = blur + hidden +
+    // fullscreen exit); count it once.
+    if (Date.now() - lastReportAtRef.current < 1500) return;
+    lastReportAtRef.current = Date.now();
+
+    const event: ViolationEvent = { type, at: Date.now(), detail };
+    setLastViolation(event);
+    countRef.current += 1;
+    setViolationCount(countRef.current);
+    if (countRef.current >= configRef.current.maxViolations) onMaxRef.current?.();
+    onViolationRef.current(event);
+  }, []);
 
   const requestEnterFullscreen = useCallback(async () => {
     suppressUntilRef.current = Date.now() + 700;
@@ -96,11 +106,21 @@ export function useExamSecurity({
     // instead of waiting for a change event that already happened.
     setIsFullscreen(document.fullscreenElement !== null);
 
+    setIsAway(document.hidden || !document.hasFocus());
+
     const handleVisibilityChange = () => {
-      if (document.hidden) report("TAB_HIDDEN");
+      if (document.hidden) {
+        setIsAway(true);
+        report("TAB_HIDDEN");
+      }
     };
 
-    const handleBlur = () => report("WINDOW_BLUR");
+    const handleBlur = () => {
+      setIsAway(true);
+      report("WINDOW_BLUR");
+    };
+
+    const handleFocus = () => setIsAway(false);
 
     const handleFullscreenChange = () => {
       const active = document.fullscreenElement !== null;
@@ -185,6 +205,7 @@ export function useExamSecurity({
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("blur", handleBlur);
+    window.addEventListener("focus", handleFocus);
     document.addEventListener("fullscreenchange", handleFullscreenChange);
     document.addEventListener("contextmenu", handleContextMenu);
     document.addEventListener("selectstart", handleSelectStart);
@@ -197,6 +218,7 @@ export function useExamSecurity({
       document.body.classList.remove("exam-lockdown");
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("focus", handleFocus);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
       document.removeEventListener("contextmenu", handleContextMenu);
       document.removeEventListener("selectstart", handleSelectStart);
@@ -208,13 +230,13 @@ export function useExamSecurity({
         document.exitFullscreen().catch(() => undefined);
       }
     };
-    // `report` is stable via useCallback; config changes are read through configRef.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // `report` is stable (empty deps); config and callbacks are read through refs.
   }, [enabled, report]);
 
   const syncViolationCount = useCallback((serverCount: number) => {
+    countRef.current = serverCount;
     setViolationCount(serverCount);
   }, []);
 
-  return { isFullscreen, violationCount, lastViolation, requestEnterFullscreen, syncViolationCount };
+  return { isFullscreen, isAway, violationCount, lastViolation, requestEnterFullscreen, syncViolationCount };
 }

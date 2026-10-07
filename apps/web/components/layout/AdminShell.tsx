@@ -5,10 +5,10 @@ import { usePathname } from "next/navigation";
 import { getStoredFullName, logout } from "@/lib/auth";
 
 const NAV_ITEMS = [
-  { href: "/admin", label: "หน้าแรกระบบหลังบ้าน", icon: "dashboard" },
-  { href: "/admin/courses/new", label: "สร้างรายวิชา", icon: "add_business" },
-  { href: "/admin/exams/new", label: "สร้างข้อสอบ", icon: "post_add" },
-  { href: "/admin/materials/upload", label: "อัพโหลดเอกสาร", icon: "upload_file" },
+  { href: "/backoffice/monitor", label: "คุมสอบ", icon: "live_tv" },
+  { href: "/backoffice/courses/new", label: "สร้างรายวิชา", icon: "add_business" },
+  { href: "/backoffice/exams/new", label: "สร้างข้อสอบ", icon: "post_add" },
+  { href: "/backoffice/materials/upload", label: "อัพโหลดเอกสาร", icon: "upload_file" },
 ];
 
 // Fully separate visual identity from the student-facing (portal) shell —
@@ -21,7 +21,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
   const handleLogout = () => {
     logout();
-    window.location.href = "/dashboard";
+    window.location.href = "/backoffice/login";
   };
 
   return (
@@ -40,7 +40,8 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
           <nav className="flex flex-col gap-1 px-3 py-4">
             {NAV_ITEMS.map((item) => {
-              const active = item.href === "/admin" ? pathname === "/admin" : pathname.startsWith(item.href);
+              const active =
+                pathname.startsWith(item.href) || (item.href === "/backoffice/monitor" && pathname.endsWith("/monitor"));
               return (
                 <Link
                   key={item.href}
@@ -63,13 +64,6 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
         </div>
 
         <div className="p-3 border-t border-tertiary/20 space-y-2">
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-2.5 px-3 py-2 rounded text-xs text-on-surface-variant hover:bg-surface-container hover:text-on-surface transition-colors"
-          >
-            <span className="material-symbols-outlined text-base">arrow_back</span>
-            กลับสู่หน้าเว็บหลัก
-          </Link>
           <div className="flex items-center justify-between px-3 py-2 rounded bg-surface-container-lowest border border-outline-variant/30 text-xs">
             <span className="text-on-surface-variant truncate">{fullName ?? "ผู้ดูแลระบบ"}</span>
             <button
@@ -90,7 +84,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
             Admin Only
           </span>
         </header>
-        <main className="w-full px-6 py-8 max-w-4xl">{children}</main>
+        <main className="w-full px-6 py-8 max-w-7xl">{children}</main>
       </div>
     </div>
   );

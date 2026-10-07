@@ -1,8 +1,12 @@
+import { getStoredAccessToken as getAccessToken } from "./auth";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 
-function getAccessToken(): string | null {
-  if (typeof window === "undefined") return null;
-  return window.localStorage.getItem("accessToken");
+/** A non-2xx API response; `status` lets callers tell e.g. 410 (attempt reset) from other failures. */
+export class ApiError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+  }
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -19,7 +23,7 @@ export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(body.error ?? "Request failed");
+    throw new ApiError(body.error ?? "Request failed", res.status);
   }
 
   if (res.status === 204) return undefined as T;

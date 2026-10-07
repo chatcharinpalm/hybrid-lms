@@ -4,6 +4,7 @@ import { VIOLATION_TYPES } from "../constants";
 import { prisma } from "../prisma";
 import * as examSession from "../services/examSession.service";
 import { ExamRuleError } from "../services/examSession.service";
+import * as proctorControl from "../services/proctorControl.service";
 
 const createExamSchema = z.object({
   courseId: z.string().uuid(),
@@ -116,6 +117,18 @@ export async function saveAnswer(req: Request, res: Response) {
   }
 }
 
+export async function updateProgress(req: Request, res: Response) {
+  const schema = z.object({ currentQuestionIndex: z.number().int().min(0) });
+  const body = schema.parse(req.body);
+  try {
+    const state = await examSession.updateProgress(req.params.attemptId, req.user!.id, body.currentQuestionIndex);
+    return res.json(state);
+  } catch (err) {
+    if (err instanceof ExamRuleError) return res.status(409).json({ error: err.message });
+    throw err;
+  }
+}
+
 const violationSchema = z.object({
   type: z.enum(VIOLATION_TYPES),
   detail: z.record(z.unknown()).optional(),
@@ -155,4 +168,83 @@ export async function getAttemptViolations(req: Request, res: Response) {
   return res.json(
     violations.map((v) => ({ ...v, detail: v.detail ? JSON.parse(v.detail) : null }))
   );
+}
+
+export async function getLiveProctoring(req: Request, res: Response) {
+  try {
+    const data = await examSession.getLiveProctoringData(req.params.examId);
+    return res.json(data);
+  } catch (err) {
+    if (err instanceof ExamRuleError) return res.status(404).json({ error: err.message });
+    throw err;
+  }
+}
+
+export async function getLiveState(req: Request, res: Response) {
+  try {
+    return res.json(await examSession.getLiveState(req.params.attemptId, req.user!.id));
+  } catch (err) {
+    if (err instanceof ExamRuleError && err.message === "ATTEMPT_RESET") {
+      return res.status(410).json({ error: "การสอบของคุณถูกรีเซ็ตโดยผู้คุมสอบ", reset: true });
+    }
+    if (err instanceof ExamRuleError) return res.status(409).json({ error: err.message });
+    throw err;
+  }
+}
+
+// ── Back-office controls ─────────────────────────────────────
+
+/** Runs a control action, mapping rule violations (not found, no permission, wrong state) to 409. */
+async function control(res: Response, action: () => Promise<unknown>) {
+  try {
+    const result = await action();
+    return result === undefined ? res.status(204).send() : res.json(result);
+  } catch (err) {
+    if (err instanceof ExamRuleError) return res.status(409).json({ error: err.message });
+    throw err;
+  }
+}
+
+const actor = (req: Request) => ({ id: req.user!.id, role: req.user!.role });
+const reasonSchema = z.object({ reason: z.string().max(500).optional() });
+
+export async function setExamStatus(req: Request, res: Response) {
+  const { status } = z.object({ status: z.enum(["OPEN", "CLOSED"]) }).parse(req.body);
+  return control(res, () => proctorControl.setExamStatus(req.params.examId, status, actor(req)));
+}
+
+export async function forceSubmitAttempt(req: Request, res: Response) {
+  const { reason } = reasonSchema.parse(req.body ?? {});
+  return control(res, () => proctorControl.forceSubmit(req.params.attemptId, actor(req), reason));
+}
+
+export async function resetAttempt(req: Request, res: Response) {
+  const { reason } = reasonSchema.parse(req.body ?? {});
+  return control(res, () => proctorControl.resetAttempt(req.params.attemptId, actor(req), reason));
+}
+
+export async function forgiveViolations(req: Request, res: Response) {
+  return control(res, () => proctorControl.forgiveViolations(req.params.attemptId, actor(req)));
+}
+
+export async function addQuestionTime(req: Request, res: Response) {
+  const { seconds } = z.object({ seconds: z.number().int().min(10).max(3600) }).parse(req.body);
+  return control(res, () => proctorControl.addQuestionTime(req.params.attemptId, seconds, actor(req)));
+}
+
+export async function sendProctorMessage(req: Request, res: Response) {
+  const { message } = z.object({ message: z.string().trim().min(1).max(500) }).parse(req.body);
+  return control(res, () => proctorControl.sendMessage(req.params.attemptId, message, actor(req)));
+}
+
+export async function getExamAuditLog(req: Request, res: Response) {
+  return control(res, () => proctorControl.listExamAuditLog(req.params.examId, actor(req)));
+}
+export async function getMyLatestResult(req: Request, res: Response) {
+  try {
+    return res.json(await examSession.getMyLatestResult(req.params.examId, req.user!.id));
+  } catch (err) {
+    if (err instanceof ExamRuleError) return res.status(404).json({ error: err.message });
+    throw err;
+  }
 }

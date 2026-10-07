@@ -19,7 +19,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
 
@@ -38,7 +38,7 @@ model User {
   studentCode   String?  @unique // e.g. university/enrollment ID — required for student self-registration
   faculty       String? // e.g. คณะวิศวกรรมศาสตร์ — required for student self-registration
   major         String? // e.g. วิศวกรรมคอมพิวเตอร์ — required for student self-registration
-  avatarUrl     String?
+  avatarUrl     String? @db.VarChar(1000)
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
@@ -61,7 +61,7 @@ model Course {
   id          String   @id @default(uuid())
   code        String   @unique // e.g. CPE-321
   title       String
-  description String?
+  description String? @db.Text
   termLabel   String? // e.g. 2/2567
   teacherId   String
   teacher     User     @relation("CourseTeacher", fields: [teacherId], references: [id])
@@ -95,7 +95,7 @@ model ClassSession {
   startsAt      DateTime
   endsAt        DateTime
   onsiteRoom    String? // e.g. "Building 402"
-  onlineJoinUrl String? // e.g. Teams/Zoom link
+  onlineJoinUrl String? @db.VarChar(1000) // e.g. Teams/Zoom link
   qrSecret      String? // rotating-QR seed for onsite check-in (see AttendanceRecord)
   createdAt     DateTime @default(now())
 
@@ -112,7 +112,7 @@ model AttendanceRecord {
   method      String // AttendanceMethod: QR_ONSITE | ONLINE_JOIN | MANUAL
   checkedInAt DateTime @default(now())
   ipAddress   String?
-  metadata    String? // JSON-encoded, e.g. { token, deviceInfo }
+  metadata    String? @db.Text // JSON-encoded, e.g. { token, deviceInfo }
 
   session ClassSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   student User         @relation(fields: [studentId], references: [id], onDelete: Cascade)
@@ -126,7 +126,7 @@ model CourseMaterial {
   uploaderId String
   title      String
   type       String // MaterialType: SLIDE | VIDEO | DOCUMENT | LINK
-  fileUrl    String // storage path or external URL
+  fileUrl    String @db.VarChar(1000) // storage path or external URL
   sizeBytes  Int?
   createdAt  DateTime @default(now())
 
@@ -144,7 +144,7 @@ model Exam {
   id               String    @id @default(uuid())
   courseId         String
   title            String
-  description      String?
+  description      String? @db.Text
   durationMinutes  Int
   passScorePercent Int       @default(60)
   maxAttempts      Int       @default(1)
@@ -159,6 +159,9 @@ model Exam {
   maxViolations     Int     @default(3) // auto-submit threshold
   shuffleQuestions  Boolean @default(true)
   shuffleOptions    Boolean @default(true)
+  // Per-question time limit, enforced server-side. Null = no per-question limit.
+  // When set, students move strictly forward (no going back to earlier questions).
+  timePerQuestionSeconds Int?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -173,12 +176,12 @@ model Exam {
 model Question {
   id     String @id @default(uuid())
   examId String
-  type   String @default("SINGLE_CHOICE") // QuestionType: SINGLE_CHOICE | MULTIPLE_CHOICE | SHORT_ANSWER
-  prompt String
+  type   String @default("SINGLE_CHOICE") // QuestionType: SINGLE_CHOICE | MULTIPLE_CHOICE | SHORT_ANSWER | FILL_IN_BANK (pick one answer-bank entry to fill the blank)
+  prompt String @db.Text
   points Int    @default(1)
   order  Int    @default(0) // authoring order (randomized at attempt time)
   // For SHORT_ANSWER, exact/normalized match or hash comparison
-  answerKey String?
+  answerKey String? @db.Text
 
   exam    Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
   options QuestionOption[]
@@ -189,7 +192,7 @@ model Question {
 model QuestionOption {
   id         String  @id @default(uuid())
   questionId String
-  label      String
+  label      String @db.VarChar(1000)
   isCorrect  Boolean @default(false)
   order      Int     @default(0)
 
@@ -208,7 +211,10 @@ model ExamAttempt {
   scorePoints    Int?
   scorePercent   Float?
   passed         Boolean?
-  violationCount Int       @default(0)
+  violationCount       Int       @default(0)
+  currentQuestionIndex Int       @default(0)
+  // When the current question was shown; the server measures the per-question limit from here.
+  currentQuestionStartedAt DateTime?
 
   // Per-student randomization seed so question/option order is
   // reproducible for grading/review but unique per attempt.
@@ -218,16 +224,33 @@ model ExamAttempt {
   student    User               @relation(fields: [studentId], references: [id], onDelete: Cascade)
   answers    ExamAnswer[]
   violations ExamViolationLog[]
+  messages   ProctorMessage[]
+
+  // Why the attempt ended: STUDENT | TIMEOUT | VIOLATIONS | ADMIN_FORCED | EXAM_CLOSED
+  endedReason String?
 
   @@index([examId, studentId])
+}
+
+// Warning sent from the back office to one student's exam screen.
+model ProctorMessage {
+  id        String    @id @default(uuid())
+  attemptId String
+  message   String    @db.Text
+  createdAt DateTime  @default(now())
+  seenAt    DateTime?
+
+  attempt ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+
+  @@index([attemptId])
 }
 
 model ExamAnswer {
   id                String   @id @default(uuid())
   attemptId         String
   questionId        String
-  selectedOptionIds String   @default("[]") // JSON-encoded string[], for single/multiple choice
-  textAnswer        String? // for short answer / flag submission
+  selectedOptionIds String   @db.VarChar(1000) @default("[]") // JSON-encoded string[], for single/multiple choice
+  textAnswer        String? @db.Text // for short answer / flag submission
   isCorrect         Boolean?
   pointsAwarded     Int?
   answeredAt        DateTime @default(now())
@@ -247,7 +270,7 @@ model ExamViolationLog {
   attemptId  String
   type       String
   occurredAt DateTime @default(now())
-  detail     String? // JSON-encoded, e.g. { durationMs, key, screenCount }
+  detail     String? @db.Text // JSON-encoded, e.g. { durationMs, key, screenCount }
 
   attempt ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
 
@@ -261,7 +284,7 @@ model AuditLog {
   action    String
   entity    String
   entityId  String?
-  metadata  String? // JSON-encoded
+  metadata  String? @db.Text // JSON-encoded
   createdAt DateTime @default(now())
 
   actor User? @relation(fields: [actorId], references: [id])

@@ -2,6 +2,20 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma";
 
+/** Public course card for the login page: course info plus the instructor's display name and photo. */
+export async function getCourseInstructor(req: Request, res: Response) {
+  const course = await prisma.course.findUnique({
+    where: { code: req.params.code },
+    select: {
+      code: true,
+      title: true,
+      teacher: { select: { fullName: true, avatarUrl: true } },
+    },
+  });
+  if (!course) return res.status(404).json({ error: "Course not found" });
+  return res.json(course);
+}
+
 export async function listCourses(req: Request, res: Response) {
   // Public/anonymous browsing shows the full catalog. A logged-in caller
   // gets a personalized view instead (their enrollments, or the courses

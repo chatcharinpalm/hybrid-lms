@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt";
+import type { Role } from "../constants";
 
 // Public self-registration is student-only by design — teacher/admin
 // accounts are provisioned separately (seed script or a future
@@ -59,7 +60,7 @@ export async function login(req: Request, res: Response) {
   const valid = await bcrypt.compare(body.password, user.passwordHash);
   if (!valid) return res.status(401).json({ error: "Invalid credentials" });
 
-  const accessToken = signAccessToken({ sub: user.id, role: user.role, email: user.email });
+  const accessToken = signAccessToken({ sub: user.id, role: user.role as Role, email: user.email });
   const refreshToken = signRefreshToken({ sub: user.id });
 
   // In production the frontend (Vercel) and API (Render) are different
@@ -89,7 +90,7 @@ export async function refresh(req: Request, res: Response) {
     const user = await prisma.user.findUnique({ where: { id: payload.sub } });
     if (!user || !user.isActive) return res.status(401).json({ error: "Invalid session" });
 
-    const accessToken = signAccessToken({ sub: user.id, role: user.role, email: user.email });
+    const accessToken = signAccessToken({ sub: user.id, role: user.role as Role, email: user.email });
     return res.json({ accessToken });
   } catch {
     return res.status(401).json({ error: "Invalid or expired refresh token" });

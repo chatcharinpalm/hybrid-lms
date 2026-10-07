@@ -22,7 +22,7 @@ export default function NewCoursePage() {
         method: "POST",
         body: JSON.stringify(form),
       });
-      router.push(`/admin/materials/upload?courseId=${course.id}`);
+      router.push(`/backoffice/materials/upload?courseId=${course.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "สร้างรายวิชาไม่สำเร็จ");
     } finally {

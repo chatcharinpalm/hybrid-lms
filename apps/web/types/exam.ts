@@ -1,4 +1,4 @@
-export type QuestionType = "SINGLE_CHOICE" | "MULTIPLE_CHOICE" | "SHORT_ANSWER";
+export type QuestionType = "SINGLE_CHOICE" | "MULTIPLE_CHOICE" | "SHORT_ANSWER" | "FILL_IN_BANK";
 
 export interface ExamOption {
   id: string;
@@ -24,6 +24,12 @@ export interface ExamPaper {
   attemptId: string;
   startedAt: string;
   durationMinutes: number;
+  examTitle?: string;
+  currentQuestionIndex?: number;
+  /** Per-question limit; null when the exam has none. */
+  timePerQuestionSeconds?: number | null;
+  /** Server-computed time remaining on the current question. */
+  questionSecondsLeft?: number | null;
   security: ExamSecurityConfig;
   questions: ExamQuestion[];
 }

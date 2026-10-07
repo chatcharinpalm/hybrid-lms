@@ -13,6 +13,11 @@ interface SecureExamShellProps {
   startedAt: string;
   durationMinutes: number;
   security: ExamSecurityConfig;
+  currentQuestionNumber?: number;
+  /** Violation count reported by the server (e.g. after a proctor forgives violations). */
+  serverViolationCount?: number;
+  /** Hide the whole-exam countdown (e.g. when each question has its own timer). */
+  hideOverallTimer?: boolean;
   /** The exam paper UI — question list, flag inputs, etc. */
   children: React.ReactNode;
   onExpire: () => void;
@@ -41,6 +46,9 @@ export function SecureExamShell({
   startedAt,
   durationMinutes,
   security,
+  currentQuestionNumber,
+  serverViolationCount,
+  hideOverallTimer,
   children,
   onExpire,
   onForceSubmit,
@@ -71,7 +79,7 @@ export function SecureExamShell({
     [attemptId, onForceSubmit]
   );
 
-  const { isFullscreen, violationCount, lastViolation, requestEnterFullscreen, syncViolationCount } =
+  const { isFullscreen, isAway, violationCount, lastViolation, requestEnterFullscreen, syncViolationCount } =
     useExamSecurity({
       enabled: lockedIn,
       config: security,
@@ -83,6 +91,12 @@ export function SecureExamShell({
     syncCountRef.current = syncViolationCount;
   }, [syncViolationCount]);
 
+  // Keep the local auto-submit counter in line with the server's count.
+  useEffect(() => {
+    if (typeof serverViolationCount === "number") syncViolationCount(serverViolationCount);
+  }, [serverViolationCount, syncViolationCount]);
+
+
   const handleEnter = async () => {
     if (security.requireFullscreen) {
       await requestEnterFullscreen();
@@ -90,65 +104,98 @@ export function SecureExamShell({
     setLockedIn(true);
   };
 
+  // Back to the exam after leaving it: must run from a click so the browser allows fullscreen.
+  const handleReturn = async () => {
+    setModalOpen(false);
+    if (security.requireFullscreen && !document.fullscreenElement) {
+      await requestEnterFullscreen();
+    }
+  };
+
   if (!lockedIn) {
     return (
       <div className="min-h-screen flex items-center justify-center p-6">
-        <div className="max-w-lg w-full rounded-lg border border-outline-variant/40 bg-surface-container p-8 text-center space-y-5">
-          <span className="material-symbols-outlined text-4xl text-primary">lock</span>
-          <h1 className="text-lg font-semibold text-on-surface">{title}</h1>
-          <p className="text-xs text-on-surface-variant leading-relaxed">
-            ระบบจะเข้าสู่โหมดเต็มหน้าจอและล็อกฟังก์ชันคัดลอก/วาง คลิกขวา และคีย์ลัดบางส่วน
-            การสลับหน้าต่างหรือออกจากโหมดเต็มหน้าจอจะถูกบันทึกเป็นการทุจริต
-          </p>
-          <ul className="text-[11px] text-on-surface-variant text-left bg-surface-container-lowest border border-outline-variant/20 rounded p-3 space-y-1 font-mono">
-            <li>• Fullscreen Lockdown: {security.requireFullscreen ? "เปิดใช้งาน" : "ปิด"}</li>
-            <li>• Clipboard Block: {security.blockClipboard ? "เปิดใช้งาน" : "ปิด"}</li>
-            <li>• Context Menu Block: {security.blockContextMenu ? "เปิดใช้งาน" : "ปิด"}</li>
-            <li>• Auto-submit threshold: {security.maxViolations} ครั้ง</li>
+        <div className="max-w-md w-full rounded-2xl border border-outline-variant/40 bg-surface-container p-8 text-center space-y-5">
+          <span className="material-symbols-outlined text-5xl text-primary">quiz</span>
+          <h1 className="text-xl font-bold text-on-surface">พร้อมเริ่มสอบหรือยัง?</h1>
+          <ul className="text-sm text-on-surface-variant text-left space-y-2.5">
+            <li className="flex gap-2">
+              <span className="material-symbols-outlined text-base text-primary">fullscreen</span>
+              หน้าจอจะขยายเต็มจอตลอดการสอบ
+            </li>
+            <li className="flex gap-2">
+              <span className="material-symbols-outlined text-base text-primary">tab_close</span>
+              ห้ามสลับหน้าต่าง ห้ามออกจากเต็มจอ ห้ามคัดลอก
+            </li>
+            <li className="flex gap-2">
+              <span className="material-symbols-outlined text-base text-error">warning</span>
+              ทำผิดครบ {security.maxViolations} ครั้ง ระบบจะส่งข้อสอบทันที
+            </li>
           </ul>
           <button
             type="button"
             onClick={handleEnter}
-            className="w-full py-2.5 rounded bg-primary text-on-primary font-semibold text-sm hover:opacity-90 transition-opacity"
+            className="w-full py-3.5 rounded-xl bg-primary text-on-primary font-bold text-base hover:opacity-90 transition-opacity"
           >
-            เข้าสู่ห้องสอบ (Enter Secure Mode)
+            เริ่มทำข้อสอบ
           </button>
         </div>
       </div>
     );
   }
 
+  // The exam stays covered whenever the student is out of fullscreen or away from the window.
+  const locked = (security.requireFullscreen && !isFullscreen) || isAway;
+
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-40 h-16 bg-surface/95 backdrop-blur border-b border-outline-variant/30 px-6 flex items-center justify-between">
-        <div className="flex items-center gap-4 min-w-0">
-          <h1 className="text-sm font-semibold text-on-surface truncate">{title}</h1>
+      <header className="sticky top-0 z-40 h-14 bg-surface/95 backdrop-blur border-b border-outline-variant/30 px-4 sm:px-6 flex items-center justify-between gap-3">
+        <h1 className="text-sm font-semibold text-on-surface truncate">{title}</h1>
+        <div className="flex items-center gap-3 shrink-0">
           <span
-            className={`hidden sm:flex items-center gap-1.5 text-[11px] font-mono px-2 py-0.5 rounded border ${
-              isFullscreen
+            className={`flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-full border ${
+              violationCount === 0
                 ? "text-secondary border-secondary/30 bg-secondary/10"
-                : "text-error border-error/30 bg-error/10"
+                : "text-error border-error/40 bg-error/10"
             }`}
           >
-            <span className={`w-1.5 h-1.5 rounded-full ${isFullscreen ? "bg-secondary" : "bg-error"}`} />
-            {isFullscreen ? "Lockdown Active" : "Lockdown Inactive"}
+            <span className="material-symbols-outlined text-sm">{violationCount === 0 ? "verified_user" : "warning"}</span>
+            {violationCount === 0 ? "ยังไม่ทำผิด" : `ทำผิด ${violationCount}/${security.maxViolations}`}
           </span>
-          <span className="hidden md:flex items-center gap-1.5 text-[11px] font-mono px-2 py-0.5 rounded border border-outline-variant/40 text-on-surface-variant">
-            <span className="material-symbols-outlined text-sm">shield</span>
-            Violations: {violationCount}/{security.maxViolations}
-          </span>
+          <div className={hideOverallTimer ? "hidden" : ""}>
+            <ExamTimer startedAt={startedAt} durationMinutes={durationMinutes} onExpire={onExpire} />
+          </div>
         </div>
-        <ExamTimer startedAt={startedAt} durationMinutes={durationMinutes} onExpire={onExpire} />
       </header>
 
-      <main className="max-w-5xl mx-auto p-6 space-y-6 select-none">{children}</main>
+      <main className={`max-w-3xl mx-auto p-4 sm:p-6 space-y-5 select-none ${locked ? "invisible" : ""}`}>{children}</main>
+
+      {locked && !modalOpen && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-surface p-6">
+          <div className="max-w-sm text-center space-y-4">
+            <span className="material-symbols-outlined text-5xl text-error">lock</span>
+            <h2 className="text-lg font-bold text-on-surface">ข้อสอบถูกล็อก</h2>
+            <p className="text-sm text-on-surface-variant">
+              คุณออกจากหน้าจอสอบ ระบบบันทึกไว้แล้ว กดปุ่มด้านล่างเพื่อกลับไปทำข้อสอบต่อ
+            </p>
+            <button
+              type="button"
+              onClick={handleReturn}
+              className="w-full py-3.5 rounded-xl bg-primary text-on-primary font-bold text-base hover:opacity-90"
+            >
+              กลับไปทำข้อสอบ
+            </button>
+          </div>
+        </div>
+      )}
 
       <ViolationModal
         open={modalOpen}
         violation={lastViolation}
         violationCount={violationCount}
         maxViolations={security.maxViolations}
-        onAcknowledge={() => setModalOpen(false)}
+        currentQuestionNumber={currentQuestionNumber}
+        onAcknowledge={handleReturn}
       />
     </div>
   );
