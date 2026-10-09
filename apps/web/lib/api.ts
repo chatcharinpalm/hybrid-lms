@@ -8,7 +8,10 @@ import {
   storeAccessToken,
 } from "./auth";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
+// Unset in production: the browser calls /api on the site's own domain and
+// next.config.mjs forwards it to the API server (API_ORIGIN), so the whole
+// system lives under one domain. Local dev sets it to http://localhost:4000.
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 /** A non-2xx API response; `status` lets callers tell e.g. 410 (attempt reset) from other failures. */
 export class ApiError extends Error {

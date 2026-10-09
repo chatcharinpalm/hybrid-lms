@@ -11,7 +11,8 @@
     "prisma:migrate": "prisma migrate dev",
     "prisma:push": "prisma db push --accept-data-loss",
     "prisma:studio": "prisma studio",
-    "prisma:seed": "node -r ts-node/register/transpile-only prisma/seed.ts"
+    "prisma:seed": "node -r ts-node/register/transpile-only prisma/seed.ts",
+    "seed:all": "node -r ts-node/register/transpile-only prisma/seed.ts && node -r ts-node/register/transpile-only prisma/seedCourses.ts && node -r ts-node/register/transpile-only prisma/seedRoster.ts && node -r ts-node/register/transpile-only prisma/seedExam5.ts && node -r ts-node/register/transpile-only prisma/seedPaperExam.ts data/exam6.json && node -r ts-node/register/transpile-only prisma/seedPaperExam.ts data/exam7.json"
   },
   "prisma": {
     "seed": "node -r ts-node/register/transpile-only prisma/seed.ts"
