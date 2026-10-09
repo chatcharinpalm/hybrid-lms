@@ -10,6 +10,7 @@ import { attendanceRouter } from "./routes/attendance.routes";
 import { courseRouter } from "./routes/course.routes";
 import { studentRouter } from "./routes/student.routes";
 import { errorHandler } from "./middleware/errorHandler";
+import { prisma } from "./prisma";
 
 const app = express();
 
@@ -20,6 +21,12 @@ app.use(cookieParser());
 app.use("/uploads", express.static(path.resolve(env.uploadDir)));
 
 app.get("/health", (_req, res) => res.json({ ok: true }));
+// Hit daily by a Vercel cron (vercel.json): a real query keeps the free Supabase
+// project from pausing itself after a week without traffic (e.g. over a break).
+app.get("/api/keepalive", async (_req, res) => {
+  await prisma.$queryRaw`SELECT 1`;
+  res.json({ ok: true, at: new Date().toISOString() });
+});
 
 app.use("/api/auth", authRouter);
 app.use("/api/exams", examRouter);
