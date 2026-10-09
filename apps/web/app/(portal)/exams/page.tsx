@@ -23,7 +23,7 @@ interface ExamSummary {
 const STATUS_LABEL: Record<ExamSummary["status"], { text: string; className: string }> = {
   OPEN: { text: "เปิดให้ทำแบบทดสอบ", className: "bg-secondary/10 text-secondary border-secondary/20" },
   SCHEDULED: { text: "กำหนดการถัดไป", className: "bg-surface-container-highest text-outline border-outline-variant/30" },
-  CLOSED: { text: "ตรวจแล้วเสร็จ (Closed)", className: "bg-surface-container-highest text-outline border-outline-variant/30" },
+  CLOSED: { text: "ห้องสอบปิด", className: "bg-surface-container-highest text-outline border-outline-variant/30" },
   DRAFT: { text: "ยังไม่เผยแพร่", className: "bg-surface-container-highest text-outline border-outline-variant/30" },
 };
 
@@ -62,9 +62,6 @@ export default function ExamsPage() {
       {courses.map((course) => (
         <div key={course.id} className="space-y-3">
           <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded text-xs font-mono font-medium bg-surface-container-high text-on-surface-variant">
-              {course.code}
-            </span>
             <h2 className="text-sm font-semibold text-on-surface">{course.title}</h2>
           </div>
 
@@ -93,7 +90,10 @@ export default function ExamsPage() {
                       เกณฑ์ผ่าน: <span className="text-on-surface font-semibold">{exam.passScorePercent}%</span>
                     </div>
                     <div className="text-right text-on-surface-variant">
-                      สิทธิ์สอบ: <span className="text-primary font-semibold">{exam.maxAttempts}</span>
+                      สิทธิ์สอบ:{" "}
+                      <span className="text-primary font-semibold">
+                        {exam.maxAttempts > 0 ? exam.maxAttempts : "ไม่จำกัด"}
+                      </span>
                     </div>
                   </div>
                   <div className="flex justify-end">
@@ -109,7 +109,7 @@ export default function ExamsPage() {
                         disabled
                         className="px-3 py-1.5 rounded bg-surface-container-high text-outline text-xs cursor-not-allowed"
                       >
-                        ยังไม่เปิดให้สอบ
+                        รอผู้คุมสอบเปิดห้อง
                       </button>
                     )}
                   </div>

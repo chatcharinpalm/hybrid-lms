@@ -78,13 +78,9 @@ redeploys automatically on env var changes.
 
 ## 5. Test it
 
-Open your Vercel URL and log in with the seeded accounts (same as local):
-
-| Role | Email | Password |
-|---|---|---|
-| Admin | `admin@netsechub.dev` | `Password123!` |
-| Teacher | `teacher@netsechub.dev` | `Password123!` |
-| Student | `student@netsechub.dev` | `Password123!` |
+Open your Vercel URL `/login`: the teacher tab takes `admin@netsechub.dev` /
+`teacher@netsechub.dev` with the `STAFF_PASSWORD` used when seeding (see README);
+students use their student code and printed access code.
 
 ## What I can finish for you once you're back with the Neon URL + Render URL
 

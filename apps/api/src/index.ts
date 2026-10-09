@@ -8,6 +8,7 @@ import { authRouter } from "./routes/auth.routes";
 import { examRouter } from "./routes/exam.routes";
 import { attendanceRouter } from "./routes/attendance.routes";
 import { courseRouter } from "./routes/course.routes";
+import { studentRouter } from "./routes/student.routes";
 import { errorHandler } from "./middleware/errorHandler";
 
 const app = express();
@@ -24,6 +25,7 @@ app.use("/api/auth", authRouter);
 app.use("/api/exams", examRouter);
 app.use("/api/attendance", attendanceRouter);
 app.use("/api/courses", courseRouter);
+app.use("/api/students", studentRouter);
 
 app.use(errorHandler);
 

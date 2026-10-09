@@ -6,7 +6,7 @@ import { apiFetch } from "@/lib/api";
 
 export default function NewCoursePage() {
   const router = useRouter();
-  const [form, setForm] = useState({ code: "", title: "", description: "", termLabel: "" });
+  const [form, setForm] = useState({ title: "", description: "", termLabel: "" });
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -38,10 +38,9 @@ export default function NewCoursePage() {
       </div>
 
       <form onSubmit={handleSubmit} className="bg-surface-container border border-outline-variant/30 rounded-xl p-6 space-y-4">
-        <Field label="รหัสวิชา" placeholder="CPE-321" value={form.code} onChange={set("code")} required />
         <Field
           label="ชื่อวิชา"
-          placeholder="Network Architecture & Cyber Defense"
+          placeholder="Computer System Organization"
           value={form.title}
           onChange={set("title")}
           required

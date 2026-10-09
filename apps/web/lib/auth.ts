@@ -9,9 +9,13 @@ export function isBackofficePath(pathname: string): boolean {
   return pathname === "/backoffice" || pathname.startsWith("/backoffice/");
 }
 
-function storageKey(name: string): string {
+export type Side = "student" | "backoffice";
+
+/** Which session a page uses: the back office's under /backoffice, the student's elsewhere. */
+function storageKey(name: string, side?: Side): string {
   if (typeof window === "undefined") return name;
-  return isBackofficePath(window.location.pathname) ? `backoffice.${name}` : name;
+  const backoffice = side ? side === "backoffice" : isBackofficePath(window.location.pathname);
+  return backoffice ? `backoffice.${name}` : name;
 }
 
 export function getStoredAccessToken(): string | null {
@@ -19,10 +23,25 @@ export function getStoredAccessToken(): string | null {
   return window.localStorage.getItem(storageKey("accessToken"));
 }
 
-export function storeSession(session: { accessToken: string; role: Role; fullName: string }) {
-  window.localStorage.setItem(storageKey("accessToken"), session.accessToken);
-  window.localStorage.setItem(storageKey("role"), session.role);
-  window.localStorage.setItem(storageKey("fullName"), session.fullName);
+export function getStoredRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  return window.localStorage.getItem(storageKey("refreshToken"));
+}
+
+/** Replaces the short-lived access token after a refresh. */
+export function storeAccessToken(accessToken: string) {
+  window.localStorage.setItem(storageKey("accessToken"), accessToken);
+}
+
+/** `side` overrides the current page's: the shared /login page signs teachers into the back office. */
+export function storeSession(
+  session: { accessToken: string; refreshToken?: string; role: Role; fullName: string },
+  side?: Side
+) {
+  window.localStorage.setItem(storageKey("accessToken", side), session.accessToken);
+  if (session.refreshToken) window.localStorage.setItem(storageKey("refreshToken", side), session.refreshToken);
+  window.localStorage.setItem(storageKey("role", side), session.role);
+  window.localStorage.setItem(storageKey("fullName", side), session.fullName);
 }
 
 export function getStoredRole(): Role | null {
@@ -45,6 +64,7 @@ export function getStoredFullName(): string | null {
 
 export function logout() {
   window.localStorage.removeItem(storageKey("accessToken"));
+  window.localStorage.removeItem(storageKey("refreshToken"));
   window.localStorage.removeItem(storageKey("role"));
   window.localStorage.removeItem(storageKey("fullName"));
 }
@@ -54,7 +74,7 @@ export function loginUrl(next: string): string {
   return `/login?next=${encodeURIComponent(next)}`;
 }
 
-/** Back-office equivalent of loginUrl. */
+/** Back-office equivalent of loginUrl: the same page, on the teacher tab. */
 export function backofficeLoginUrl(next: string): string {
-  return `/backoffice/login?next=${encodeURIComponent(next)}`;
+  return `/login?as=teacher&next=${encodeURIComponent(next)}`;
 }

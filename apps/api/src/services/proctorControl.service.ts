@@ -104,17 +104,25 @@ export async function forgiveViolations(attemptId: string, actor: StaffActor) {
   });
 }
 
-/** Extends the time on the student's current question. */
+/**
+ * Gives the student more time: on the current question for per-question timed
+ * exams, otherwise on the whole exam.
+ */
 export async function addQuestionTime(attemptId: string, seconds: number, actor: StaffActor) {
   const { attempt, exam } = await requireAttemptControl(attemptId, actor);
   if (attempt.status !== "IN_PROGRESS") throw new ExamRuleError("ผู้สอบคนนี้ส่งข้อสอบไปแล้ว");
-  if (!exam.timePerQuestionSeconds || !attempt.currentQuestionStartedAt) {
-    throw new ExamRuleError("ข้อสอบนี้ไม่ได้จำกัดเวลารายข้อ");
+  if (exam.timePerQuestionSeconds) {
+    if (!attempt.currentQuestionStartedAt) throw new ExamRuleError("ยังไม่เริ่มจับเวลาข้อปัจจุบัน");
+    await prisma.examAttempt.update({
+      where: { id: attemptId },
+      data: { currentQuestionStartedAt: new Date(attempt.currentQuestionStartedAt.getTime() + seconds * 1000) },
+    });
+  } else {
+    await prisma.examAttempt.update({
+      where: { id: attemptId },
+      data: { extraTimeSeconds: { increment: seconds } },
+    });
   }
-  await prisma.examAttempt.update({
-    where: { id: attemptId },
-    data: { currentQuestionStartedAt: new Date(attempt.currentQuestionStartedAt.getTime() + seconds * 1000) },
-  });
   await audit(actor, "ATTEMPT_ADD_TIME", "ExamAttempt", attemptId, attempt.examId, {
     studentId: attempt.studentId,
     seconds,

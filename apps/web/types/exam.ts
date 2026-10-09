@@ -3,6 +3,8 @@ export type QuestionType = "SINGLE_CHOICE" | "MULTIPLE_CHOICE" | "SHORT_ANSWER" 
 export interface ExamOption {
   id: string;
   label: string;
+  /** Answer-bank code as printed on the paper ("W", "A01", "Code 07"); null on choice questions. */
+  code?: string | null;
 }
 
 export interface ExamQuestion {
@@ -20,11 +22,23 @@ export interface ExamSecurityConfig {
   maxViolations: number;
 }
 
+export interface SavedAnswer {
+  selectedOptionIds?: string[];
+  textAnswer?: string;
+}
+
 export interface ExamPaper {
   attemptId: string;
   startedAt: string;
   durationMinutes: number;
+  /** Server-computed whole-exam time remaining; null on exams timed per question. */
+  secondsLeft: number | null;
   examTitle?: string;
+  examDescription?: string | null;
+  /** seatNumber: place on the room's ก–ฮ class list (same as the sign-in sheet). */
+  student: { fullName: string; studentCode: string | null; section: string | null; seatNumber: number | null };
+  /** Answers already saved on the server, by question id. */
+  answers: Record<string, SavedAnswer>;
   currentQuestionIndex?: number;
   /** Per-question limit; null when the exam has none. */
   timePerQuestionSeconds?: number | null;

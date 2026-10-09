@@ -38,6 +38,11 @@ model User {
   studentCode   String?  @unique // e.g. university/enrollment ID — required for student self-registration
   faculty       String? // e.g. คณะวิศวกรรมศาสตร์ — required for student self-registration
   major         String? // e.g. วิศวกรรมคอมพิวเตอร์ — required for student self-registration
+  section       String? // class group from the official roster, e.g. "CED 2 DE-RA"
+  // Students on the roster sign in with studentCode + this code, handed out on
+  // paper after they sign the attendance sheet. Kept readable so staff can
+  // print the slips; passwordHash always holds its hash.
+  accessCode    String? @db.VarChar(16)
   avatarUrl     String? @db.VarChar(1000)
   isActive      Boolean  @default(true)
   createdAt     DateTime @default(now())
@@ -51,6 +56,7 @@ model User {
   auditLogs         AuditLog[]
 
   @@index([role])
+  @@index([section])
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -193,6 +199,9 @@ model QuestionOption {
   id         String  @id @default(uuid())
   questionId String
   label      String @db.VarChar(1000)
+  // Answer-bank code as printed on the teacher's paper ("W", "A01", "Code 07"),
+  // so answers match the paper's answer key. Null for ordinary choice questions.
+  code       String? @db.VarChar(16)
   isCorrect  Boolean @default(false)
   order      Int     @default(0)
 
@@ -215,6 +224,8 @@ model ExamAttempt {
   currentQuestionIndex Int       @default(0)
   // When the current question was shown; the server measures the per-question limit from here.
   currentQuestionStartedAt DateTime?
+  // Extra time granted by a proctor on top of the exam's durationMinutes (untimed-per-question exams).
+  extraTimeSeconds Int @default(0)
 
   // Per-student randomization seed so question/option order is
   // reproducible for grading/review but unique per attempt.

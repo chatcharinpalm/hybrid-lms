@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { prisma } from "../prisma";
@@ -34,16 +35,17 @@ export async function listCourses(req: Request, res: Response) {
 }
 
 const createCourseSchema = z.object({
-  code: z.string().min(1),
+  // Course codes aren't shown anywhere; one is generated when none is given.
+  code: z.string().trim().optional(),
   title: z.string().min(1),
   description: z.string().optional(),
   termLabel: z.string().optional(),
 });
 
 export async function createCourse(req: Request, res: Response) {
-  const body = createCourseSchema.parse(req.body);
+  const { code, ...body } = createCourseSchema.parse(req.body);
   const course = await prisma.course.create({
-    data: { ...body, teacherId: req.user!.id },
+    data: { ...body, code: code || `C-${randomUUID().slice(0, 8)}`, teacherId: req.user!.id },
   });
   return res.status(201).json(course);
 }

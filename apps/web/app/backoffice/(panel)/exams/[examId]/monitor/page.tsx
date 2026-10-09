@@ -4,19 +4,25 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
-import { RowActions, StudentControls } from "@/components/backoffice/StudentControls";
+import { BroadcastButton, RowActions, StudentControls } from "@/components/backoffice/StudentControls";
+import { StudentWall } from "@/components/backoffice/StudentWall";
+import { AnswerSheet } from "@/components/backoffice/AnswerSheet";
 
 interface ProctorStudent {
   studentId: string;
   fullName: string;
   email: string;
   studentCode: string;
+  section: string | null;
+  /** Place on the room's ก–ฮ class list. */
+  seatNumber: number | null;
   faculty: string;
   major: string;
   avatarUrl?: string | null;
   status: "NOT_STARTED" | "IN_PROGRESS" | "SUBMITTED" | "AUTO_SUBMITTED";
   endedReason: string | null;
   questionSecondsLeft: number | null;
+  secondsLeft: number | null;
   attemptId: string | null;
   startedAt: string | null;
   submittedAt: string | null;
@@ -119,6 +125,22 @@ export default function LiveProctorPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmStatus, setConfirmStatus] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
+  const [view, setView] = useState<"wall" | "table">("wall");
+  const [cheatersFirst, setCheatersFirst] = useState(false);
+  const [room, setRoom] = useState<string>("ALL");
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(document.fullscreenElement === rootRef.current);
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => undefined);
+    else rootRef.current?.requestFullscreen().catch(() => undefined);
+  };
   const [lastViolationAlert, setLastViolationAlert] = useState<{
     studentName: string;
     studentCode: string;
@@ -242,6 +264,7 @@ export default function LiveProctorPage() {
       s.email.toLowerCase().includes(searchTerm.toLowerCase());
 
     if (!matchesSearch) return false;
+    if (room !== "ALL" && s.section !== room) return false;
 
     if (statusFilter === "ALL") return true;
     if (statusFilter === "IN_PROGRESS") return s.status === "IN_PROGRESS";
@@ -251,8 +274,135 @@ export default function LiveProctorPage() {
     return true;
   });
 
+  // Students in class-list order (room by room, ก–ฮ), or rule-breakers first.
+  const roomStudents = room === "ALL" ? data.students : data.students.filter((s) => s.section === room);
+  const rooms = [...new Set(data.students.map((s) => s.section).filter((s): s is string => Boolean(s)))];
+  const wallStudents = cheatersFirst
+    ? [...roomStudents].sort(
+        (a, b) => b.violations.length - a.violations.length || a.studentCode.localeCompare(b.studentCode)
+      )
+    : roomStudents;
+
+  // The proctor alone opens and closes the room; students can retake as often as they like while it is open.
+  const roomControls = (
+    <>
+      <span
+        className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
+          examOpen
+            ? "bg-secondary/15 text-secondary border-secondary/40"
+            : "bg-surface-container-highest text-outline border-outline-variant/30"
+        }`}
+      >
+        {examOpen ? "● ห้องสอบเปิดอยู่" : "ห้องสอบปิด"}
+      </span>
+      {examOpen ? (
+        <button
+          type="button"
+          disabled={statusBusy}
+          onClick={() => (confirmStatus ? toggleExamStatus("CLOSED") : setConfirmStatus(true))}
+          onBlur={() => setConfirmStatus(false)}
+          className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-colors disabled:opacity-50 ${
+            confirmStatus ? "bg-error text-white border-error" : "bg-error/10 text-error border-error/40 hover:bg-error/20"
+          }`}
+        >
+          <span className="material-symbols-outlined text-sm">lock</span>
+          {confirmStatus ? "ยืนยันปิดและส่งข้อสอบทุกคน?" : "ปิดห้องสอบ"}
+        </button>
+      ) : (
+        <button
+          type="button"
+          disabled={statusBusy}
+          onClick={() => toggleExamStatus("OPEN")}
+          className="px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 bg-secondary/15 text-secondary border-secondary/40 hover:bg-secondary/25 disabled:opacity-50"
+        >
+          <span className="material-symbols-outlined text-sm">lock_open</span>
+          เปิดห้องสอบ
+        </button>
+      )}
+    </>
+  );
+
+  // One room's wall fits a screen; a proctor usually watches the room in front of them.
+  const roomTabs = rooms.length > 1 && (
+    <div className="flex items-center gap-1 rounded-xl border border-outline-variant/30 bg-surface-container p-1">
+      {["ALL", ...rooms].map((r) => {
+        const n = r === "ALL" ? data.students.length : data.students.filter((s) => s.section === r).length;
+        return (
+          <button
+            key={r}
+            type="button"
+            onClick={() => setRoom(r)}
+            className={`rounded-lg px-3 py-1.5 text-xs font-semibold whitespace-nowrap ${
+              room === r ? "bg-primary text-on-primary" : "text-on-surface-variant hover:text-on-surface"
+            }`}
+          >
+            {r === "ALL" ? "ทุกห้อง" : r} <span className="font-mono opacity-70">({n})</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+
+  const wallToolbar = (
+    <div className="flex flex-wrap items-center gap-2">
+      {roomTabs}
+      <BroadcastButton
+        attemptIds={roomStudents.filter((s) => s.status === "IN_PROGRESS" && s.attemptId).map((s) => s.attemptId!)}
+        onDone={showNotice}
+      />
+      <button
+        type="button"
+        onClick={() => setCheatersFirst(!cheatersFirst)}
+        className={`px-3 py-2 rounded-xl text-xs font-medium border flex items-center gap-1.5 ${
+          cheatersFirst
+            ? "bg-amber-500/15 text-amber-300 border-amber-500/40"
+            : "bg-surface-container text-on-surface-variant border-outline-variant/30"
+        }`}
+      >
+        <span className="material-symbols-outlined text-sm">sort</span>
+        {cheatersFirst ? "เรียง: คนโกงขึ้นก่อน" : "เรียง: ตามเลขที่"}
+      </button>
+      <button
+        type="button"
+        onClick={toggleFullscreen}
+        className="px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 bg-primary/15 text-primary border-primary/40 hover:bg-primary/25"
+      >
+        <span className="material-symbols-outlined text-sm">{isFullscreen ? "fullscreen_exit" : "fullscreen"}</span>
+        {isFullscreen ? "ออกจากเต็มจอ" : "ดูเต็มจอ"}
+      </button>
+    </div>
+  );
+
   return (
-    <div className="space-y-6">
+    <div
+      ref={rootRef}
+      className={isFullscreen ? "h-screen flex flex-col gap-3 overflow-hidden bg-surface p-4" : "space-y-6"}
+    >
+      {isFullscreen && (
+        <div className="flex flex-wrap items-center gap-3">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-primary/10 text-primary border border-primary/30">
+            <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+            LIVE
+          </span>
+          <h1 className="min-w-0 flex-1 truncate text-sm font-bold text-on-surface">{data.exam.title}</h1>
+          <span className="text-xs text-on-surface-variant">
+            กำลังสอบ <b className="text-primary">{data.summary.inProgress}</b> · ส่งแล้ว{" "}
+            <b className="text-secondary">{data.summary.submitted}</b> · พบการโกง{" "}
+            <b className="text-amber-400">{data.summary.violatorCount}</b> · ถูกปรับส่ง{" "}
+            <b className="text-error">{data.summary.autoSubmitted}</b> / {data.summary.totalStudents} คน
+          </span>
+          {roomControls}
+          {wallToolbar}
+        </div>
+      )}
+      {isFullscreen && notice && (
+        <div className="fixed bottom-4 left-1/2 z-[70] -translate-x-1/2 rounded-xl border border-primary/40 bg-surface-container px-4 py-2.5 text-xs text-on-surface shadow-2xl">
+          {notice}
+        </div>
+      )}
+
+      {!isFullscreen && (
+      <>
       {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-outline-variant/30 pb-4">
         <div>
@@ -276,41 +426,7 @@ export default function LiveProctorPage() {
 
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
-          <span
-            className={`px-2.5 py-1 rounded-full text-[11px] font-bold border ${
-              examOpen
-                ? "bg-secondary/15 text-secondary border-secondary/40"
-                : "bg-surface-container-highest text-outline border-outline-variant/30"
-            }`}
-          >
-            {examOpen ? "● ห้องสอบเปิดอยู่" : "ห้องสอบปิด"}
-          </span>
-          {examOpen ? (
-            <button
-              type="button"
-              disabled={statusBusy}
-              onClick={() => (confirmStatus ? toggleExamStatus("CLOSED") : setConfirmStatus(true))}
-              onBlur={() => setConfirmStatus(false)}
-              className={`px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 transition-colors disabled:opacity-50 ${
-                confirmStatus
-                  ? "bg-error text-white border-error"
-                  : "bg-error/10 text-error border-error/40 hover:bg-error/20"
-              }`}
-            >
-              <span className="material-symbols-outlined text-sm">lock</span>
-              {confirmStatus ? "ยืนยันปิดและส่งข้อสอบทุกคน?" : "ปิดห้องสอบ"}
-            </button>
-          ) : (
-            <button
-              type="button"
-              disabled={statusBusy}
-              onClick={() => toggleExamStatus("OPEN")}
-              className="px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 bg-secondary/15 text-secondary border-secondary/40 hover:bg-secondary/25 disabled:opacity-50"
-            >
-              <span className="material-symbols-outlined text-sm">lock_open</span>
-              เปิดห้องสอบ
-            </button>
-          )}
+          {roomControls}
           <button
             type="button"
             onClick={() => setAutoRefresh(!autoRefresh)}
@@ -430,7 +546,7 @@ export default function LiveProctorPage() {
         <div className="p-4 rounded-xl bg-surface-container border border-amber-500/40">
           <div className="flex items-center justify-between text-amber-400 text-xs">
             <span>พบประวัติการโกง</span>
-            <span className="material-symbols-outlined text-base">shield_alert</span>
+            <span className="material-symbols-outlined text-base">gpp_maybe</span>
           </div>
           <div className="text-2xl font-bold font-mono text-amber-400 mt-2">
             {data.summary.violatorCount} <span className="text-xs font-normal text-outline">คน</span>
@@ -438,10 +554,49 @@ export default function LiveProctorPage() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-1 rounded-xl border border-outline-variant/30 bg-surface-container p-1">
+          {[
+            { id: "wall" as const, label: "ผนังรายชื่อ (ทั้งห้อง)", icon: "grid_view" },
+            { id: "table" as const, label: "ตาราง + ประวัติ", icon: "table_rows" },
+          ].map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              onClick={() => setView(v.id)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium flex items-center gap-1.5 ${
+                view === v.id ? "bg-primary text-on-primary" : "text-on-surface-variant hover:text-on-surface"
+              }`}
+            >
+              <span className="material-symbols-outlined text-sm">{v.icon}</span>
+              {v.label}
+            </button>
+          ))}
+        </div>
+        {view === "wall" && wallToolbar}
+      </div>
+      </>
+      )}
+
+      {(view === "wall" || isFullscreen) && (
+        <div className={isFullscreen ? "flex-1 min-h-0" : ""}>
+          <StudentWall
+            students={wallStudents}
+            maxViolations={data.exam.maxViolations}
+            fit={isFullscreen}
+            timed={Boolean(data.exam.timePerQuestionSeconds)}
+            onSelect={setSelectedStudentId}
+            onAction={showNotice}
+          />
+        </div>
+      )}
+
       {/* Main Content Layout: Table & Realtime Violation Ticker */}
+      {view === "table" && !isFullscreen && (
       <div className="grid grid-cols-1 2xl:grid-cols-12 gap-6">
         {/* Left Column: Student Monitor Table (8 cols) */}
         <div className="2xl:col-span-8 space-y-4">
+          {roomTabs}
           {/* Filters & Search */}
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-surface-container p-3.5 rounded-xl border border-outline-variant/30">
             <div className="relative flex-1">
@@ -756,11 +911,12 @@ export default function LiveProctorPage() {
           </div>
         </div>
       </div>
+      )}
 
       {/* Modal: Student Detail & Full Violation Timeline */}
       {selectedStudent && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="relative w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-2xl border border-outline-variant/40 bg-surface-container p-6 space-y-5 shadow-2xl">
+          <div className="relative w-full max-w-4xl max-h-[92vh] overflow-y-auto rounded-2xl border border-outline-variant/40 bg-surface-container p-6 space-y-5 shadow-2xl">
             {/* Modal Header */}
             <div className="flex items-start justify-between border-b border-outline-variant/20 pb-4">
               <div>
@@ -768,7 +924,8 @@ export default function LiveProctorPage() {
                   ประวัติการสอบ: {selectedStudent.fullName}
                 </h3>
                 <p className="text-xs font-mono text-outline mt-0.5">
-                  รหัส: {selectedStudent.studentCode} • {selectedStudent.email}
+                  รหัส: {selectedStudent.studentCode}
+                  {selectedStudent.section && ` • ห้อง ${selectedStudent.section} เลขที่ ${selectedStudent.seatNumber ?? "-"}`}
                 </p>
               </div>
               <button
@@ -804,6 +961,11 @@ export default function LiveProctorPage() {
               </div>
             </div>
 
+            {!selectedStudent.attemptId && (
+              <p className="p-4 rounded-xl bg-surface-container-lowest/60 border border-outline-variant/30 text-xs text-on-surface-variant">
+                นักศึกษาคนนี้ยังไม่เข้าห้องสอบ — ส่งข้อความ / บังคับส่ง / ให้สอบใหม่ ได้เมื่อเริ่มทำข้อสอบแล้ว
+              </p>
+            )}
             {selectedStudent.attemptId && (
               <div className="p-4 rounded-xl bg-surface-container-lowest/60 border border-outline-variant/30">
                 <StudentControls
@@ -815,6 +977,16 @@ export default function LiveProctorPage() {
                     showNotice(`${selectedStudent.fullName}: ${text}`);
                   }}
                 />
+              </div>
+            )}
+
+            {selectedStudent.attemptId && (
+              <div className="space-y-2">
+                <h4 className="text-sm font-bold text-on-surface flex items-center gap-1.5">
+                  <span className="material-symbols-outlined text-base text-primary">fact_check</span>
+                  คำตอบของนักศึกษา
+                </h4>
+                <AnswerSheet attemptId={selectedStudent.attemptId} refreshKey={selectedStudent.answeredCount} />
               </div>
             )}
 

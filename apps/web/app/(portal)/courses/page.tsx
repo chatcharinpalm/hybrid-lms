@@ -50,9 +50,6 @@ export default function CoursesPage() {
       {courses.map((course) => (
         <div key={course.id} className="space-y-3">
           <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded text-xs font-mono bg-surface-container-high text-on-surface-variant">
-              {course.code}
-            </span>
             <h2 className="text-sm font-semibold text-on-surface">{course.title}</h2>
           </div>
           <div className="rounded-lg border border-outline-variant/30 divide-y divide-outline-variant/20 overflow-hidden">

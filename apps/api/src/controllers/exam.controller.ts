@@ -12,7 +12,7 @@ const createExamSchema = z.object({
   description: z.string().optional(),
   durationMinutes: z.number().int().positive(),
   passScorePercent: z.number().int().min(0).max(100).default(60),
-  maxAttempts: z.number().int().positive().default(1),
+  maxAttempts: z.number().int().min(0).default(0), // 0 = unlimited retakes
   opensAt: z.coerce.date().optional(),
   closesAt: z.coerce.date().optional(),
   requireFullscreen: z.boolean().default(true),
@@ -168,6 +168,15 @@ export async function getAttemptViolations(req: Request, res: Response) {
   return res.json(
     violations.map((v) => ({ ...v, detail: v.detail ? JSON.parse(v.detail) : null }))
   );
+}
+
+export async function getAttemptAnswerSheet(req: Request, res: Response) {
+  try {
+    return res.json(await examSession.getAttemptAnswerSheet(req.params.attemptId));
+  } catch (err) {
+    if (err instanceof ExamRuleError) return res.status(404).json({ error: err.message });
+    throw err;
+  }
 }
 
 export async function getLiveProctoring(req: Request, res: Response) {

@@ -79,7 +79,21 @@ npm run dev:api                   # http://localhost:4000
 npm run dev:web                   # http://localhost:3000
 ```
 
-Seeded accounts (password `Password123!`): `teacher@netsechub.dev`, `student@netsechub.dev`.
+Seeding (staff password comes from `STAFF_PASSWORD`, never the repo; the real class
+list `apps/api/prisma/data/roster.json` is kept out of git):
+
+```bash
+cd apps/api
+STAFF_PASSWORD=... node -r ts-node/register/transpile-only prisma/seed.ts   # admin@ / teacher@netsechub.dev
+node -r ts-node/register/transpile-only prisma/seedCourses.ts
+node -r ts-node/register/transpile-only prisma/seedRoster.ts
+node -r ts-node/register/transpile-only prisma/seedExam5.ts
+node -r ts-node/register/transpile-only prisma/seedPaperExam.ts data/exam6.json
+node -r ts-node/register/transpile-only prisma/seedPaperExam.ts data/exam7.json
+```
+
+Students sign in with their student code and the access code printed from the
+back office ("รายชื่อ & รหัสเข้าสอบ").
 This has been run and verified end-to-end in this environment: login, course
 creation, exam creation with the question builder, starting a shuffled
 attempt, answering, logging a violation, auto-submit at the violation

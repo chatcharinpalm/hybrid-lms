@@ -3,13 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 
 interface ExamTimerProps {
-  startedAt: string;
-  durationMinutes: number;
+  /** Epoch ms when the exam ends, derived from the server's time remaining. */
+  deadline: number;
   onExpire: () => void;
 }
 
-export function ExamTimer({ startedAt, durationMinutes, onExpire }: ExamTimerProps) {
-  const deadline = new Date(startedAt).getTime() + durationMinutes * 60_000;
+export function ExamTimer({ deadline, onExpire }: ExamTimerProps) {
   const [remainingMs, setRemainingMs] = useState(() => deadline - Date.now());
   const expiredRef = useRef(false);
   const onExpireRef = useRef(onExpire);
@@ -29,17 +28,30 @@ export function ExamTimer({ startedAt, durationMinutes, onExpire }: ExamTimerPro
   }, [deadline]);
 
   const clamped = Math.max(remainingMs, 0);
-  const hrs = String(Math.floor(clamped / 3_600_000)).padStart(2, "0");
+  const hrs = Math.floor(clamped / 3_600_000);
   const mins = String(Math.floor((clamped % 3_600_000) / 60_000)).padStart(2, "0");
   const secs = String(Math.floor((clamped % 60_000) / 1000)).padStart(2, "0");
   const isLow = clamped < 5 * 60_000;
+  const isWarn = clamped < 15 * 60_000;
 
   return (
-    <div className="px-4 py-2 rounded bg-surface-container-lowest border border-outline-variant/40 flex flex-col justify-center">
-      <span className="text-[11px] uppercase tracking-wider text-outline font-medium">เวลาคงเหลือ</span>
-      <span className={`font-mono text-lg font-semibold ${isLow ? "text-error" : "text-primary"}`}>
-        {hrs}:{mins}:{secs}
-      </span>
+    <div
+      className={`flex items-center gap-2 rounded-xl border px-3 py-1.5 ${
+        isLow
+          ? "border-error/60 bg-error/15 text-error animate-pulse"
+          : isWarn
+            ? "border-tertiary/50 bg-tertiary/10 text-tertiary"
+            : "border-primary/30 bg-primary/10 text-primary"
+      }`}
+    >
+      <span className="material-symbols-outlined text-xl">timer</span>
+      <div className="flex flex-col leading-none">
+        <span className="text-[10px] font-medium opacity-80">เวลาคงเหลือ</span>
+        <span className="font-mono text-lg font-bold tabular-nums">
+          {hrs > 0 ? `${hrs}:` : ""}
+          {mins}:{secs}
+        </span>
+      </div>
     </div>
   );
 }

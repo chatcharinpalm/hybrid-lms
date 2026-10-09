@@ -4,6 +4,7 @@ import { z } from "zod";
 import { prisma } from "../prisma";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt";
 import type { Role } from "../constants";
+import { rosterEmail } from "../utils/roster";
 
 // Public self-registration is student-only by design — teacher/admin
 // accounts are provisioned separately (seed script or a future
@@ -18,10 +19,35 @@ const registerSchema = z.object({
   major: z.string().min(1),
 });
 
-const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(1),
-});
+// Staff sign in with e-mail; roster students with their student code and the
+// access code handed to them after signing the attendance sheet.
+const loginSchema = z.union([
+  z.object({ email: z.string().email(), password: z.string().min(1) }),
+  z.object({ studentCode: z.string().min(1), password: z.string().min(1) }),
+]);
+
+/** Failed sign-ins per login key; access codes are short, so guessing is cut off. */
+const failures = new Map<string, { count: number; until: number }>();
+const MAX_FAILURES = 8;
+const LOCK_MS = 5 * 60_000;
+
+function lockedFor(key: string): number {
+  const f = failures.get(key);
+  if (!f || f.count < MAX_FAILURES) return 0;
+  const left = f.until - Date.now();
+  if (left <= 0) {
+    failures.delete(key);
+    return 0;
+  }
+  return left;
+}
+
+function recordFailure(key: string) {
+  const f = failures.get(key) ?? { count: 0, until: 0 };
+  f.count += 1;
+  f.until = Date.now() + LOCK_MS;
+  failures.set(key, f);
+}
 
 export async function register(req: Request, res: Response) {
   const body = registerSchema.parse(req.body);
@@ -53,12 +79,23 @@ export async function register(req: Request, res: Response) {
 
 export async function login(req: Request, res: Response) {
   const body = loginSchema.parse(req.body);
+  const byCode = "studentCode" in body;
+  const email = byCode ? rosterEmail(body.studentCode) : body.email.toLowerCase();
 
-  const user = await prisma.user.findUnique({ where: { email: body.email } });
-  if (!user || !user.isActive) return res.status(401).json({ error: "Invalid credentials" });
+  const wait = lockedFor(email);
+  if (wait > 0) {
+    return res.status(429).json({ error: `ใส่รหัสผิดหลายครั้ง กรุณารอ ${Math.ceil(wait / 60_000)} นาทีแล้วลองใหม่` });
+  }
 
-  const valid = await bcrypt.compare(body.password, user.passwordHash);
-  if (!valid) return res.status(401).json({ error: "Invalid credentials" });
+  const invalid = byCode ? "รหัสนักศึกษาหรือรหัสเข้าสอบไม่ถูกต้อง" : "อีเมลหรือรหัสผ่านไม่ถูกต้อง";
+  const user = await prisma.user.findUnique({ where: { email } });
+  // Access codes are case-insensitive: they are printed in capitals and typed by hand.
+  const password = byCode ? body.password.trim().toUpperCase() : body.password;
+  if (!user || !user.isActive || !(await bcrypt.compare(password, user.passwordHash))) {
+    recordFailure(email);
+    return res.status(401).json({ error: invalid });
+  }
+  failures.delete(email);
 
   const accessToken = signAccessToken({ sub: user.id, role: user.role as Role, email: user.email });
   const refreshToken = signRefreshToken({ sub: user.id });
@@ -75,14 +112,19 @@ export async function login(req: Request, res: Response) {
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
 
+  // The refresh token is also returned in the body: the student site and the
+  // back office keep separate sessions in one browser, and a single shared
+  // cookie would hand one side the other's identity on refresh.
   return res.json({
     accessToken,
+    refreshToken,
     user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role },
   });
 }
 
 export async function refresh(req: Request, res: Response) {
-  const token = req.cookies?.refresh_token;
+  const fromBody = typeof req.body?.refreshToken === "string" ? (req.body.refreshToken as string) : null;
+  const token = fromBody ?? req.cookies?.refresh_token;
   if (!token) return res.status(401).json({ error: "Missing refresh token" });
 
   try {

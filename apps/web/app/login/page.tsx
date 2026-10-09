@@ -2,19 +2,19 @@
 
 import { Suspense, useEffect, useState } from "react";
 import Image from "next/image";
-import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
-import { storeSession, type Role } from "@/lib/auth";
+import { isStaff, storeSession, type Role } from "@/lib/auth";
 import { NetworkBackground } from "@/components/ui/NetworkBackground";
 
 interface LoginResponse {
   accessToken: string;
+  refreshToken: string;
   user: { id: string; email: string; fullName: string; role: Role };
 }
 
-/** Course whose instructor is featured on the login page. */
-const FEATURED_COURSE_CODE = "CPE-321";
+/** Courses featured on the login page, with their instructor. */
+const FEATURED_COURSE_CODES = ["020413106", "DATACOM-NET"];
 
 interface CourseInstructor {
   code: string;
@@ -37,22 +37,29 @@ function LoginForm() {
   const next = searchParams.get("next");
   const justRegistered = searchParams.get("registered") === "1";
 
+  // Students and teachers share this page; teachers land in the back office.
+  const [as, setAs] = useState<"student" | "teacher">(searchParams.get("as") === "teacher" ? "teacher" : "student");
+  const [studentCode, setStudentCode] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const teacherMode = as === "teacher";
+  const switchTo = (mode: "student" | "teacher") => {
+    setAs(mode);
+    setPassword("");
+    setError(null);
+  };
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [course, setCourse] = useState<CourseInstructor | null>(null);
+  const [courses, setCourses] = useState<CourseInstructor[]>([]);
 
   useEffect(() => {
-    apiFetch<CourseInstructor>(`/api/courses/by-code/${FEATURED_COURSE_CODE}/instructor`)
-      .then(setCourse)
-      .catch(() => undefined);
+    Promise.all(
+      FEATURED_COURSE_CODES.map((code) =>
+        apiFetch<CourseInstructor>(`/api/courses/by-code/${code}/instructor`).catch(() => null)
+      )
+    ).then((list) => setCourses(list.filter((c): c is CourseInstructor => c !== null)));
   }, []);
-
-  const handleQuickLogin = (quickEmail: string, quickPass: string = "Password123!") => {
-    setEmail(quickEmail);
-    setPassword(quickPass);
-  };
+  const teacher = courses[0]?.teacher;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -61,15 +68,30 @@ function LoginForm() {
     try {
       const data = await apiFetch<LoginResponse>("/api/auth/login", {
         method: "POST",
-        body: JSON.stringify({ email, password }),
+        body: JSON.stringify(teacherMode ? { email, password } : { studentCode, password }),
       });
-      // Staff sign in through the separate back office, never here.
-      if (data.user.role !== "STUDENT") {
-        setError("บัญชีนี้ไม่ใช่บัญชีนักเรียน");
+      const session = {
+        accessToken: data.accessToken,
+        refreshToken: data.refreshToken,
+        role: data.user.role,
+        fullName: data.user.fullName,
+      };
+      if (teacherMode) {
+        if (!isStaff(data.user.role)) {
+          setError("บัญชีนี้ไม่มีสิทธิ์เข้าระบบหลังบ้าน");
+          return;
+        }
+        // Stored as the back-office session, separate from any student session in this browser.
+        storeSession(session, "backoffice");
+        router.push(next && next.startsWith("/backoffice/") ? next : "/backoffice");
         return;
       }
-      storeSession({ accessToken: data.accessToken, role: data.user.role, fullName: data.user.fullName });
-      router.push(next || "/dashboard");
+      if (data.user.role !== "STUDENT") {
+        setError("บัญชีอาจารย์ กรุณาเลือกแท็บ \"อาจารย์\"");
+        return;
+      }
+      storeSession(session, "student");
+      router.push(next && !next.startsWith("/backoffice") ? next : "/exams");
     } catch (err) {
       setError(err instanceof Error ? err.message : "เข้าสู่ระบบไม่สำเร็จ");
     } finally {
@@ -94,7 +116,7 @@ function LoginForm() {
           <div className="relative mb-4 group">
             <div className="w-32 h-32 sm:w-36 sm:h-36 rounded-2xl overflow-hidden border-2 border-primary/50 shadow-xl shadow-primary/10 relative mx-auto bg-surface-container-lowest">
               <Image
-                src={course?.teacher.avatarUrl || "/teacher.png"}
+                src={teacher?.avatarUrl || "/teacher.png"}
                 alt="อาจารย์ผู้สอน"
                 width={200}
                 height={200}
@@ -108,32 +130,22 @@ function LoginForm() {
           </div>
 
           <h2 className="text-base font-bold text-on-surface mt-2">
-            {course?.teacher.fullName ?? " "}
+            {teacher?.fullName ?? " "}
           </h2>
           <p className="text-xs text-primary font-medium mt-0.5">
             อาจารย์ผู้สอนประจำรายวิชา
           </p>
-          <div className="mt-3 px-3 py-2 rounded-xl bg-surface-container-lowest/80 border border-outline-variant/30 text-[11px] text-on-surface-variant leading-relaxed">
-            <p className="font-semibold text-on-surface">รายวิชา {course?.code ?? FEATURED_COURSE_CODE}</p>
-            <p>{course?.title ?? "Microprocessor & System Bus Architecture"}</p>
-            <p className="text-[10px] text-outline mt-1 font-mono">ระบบสอบแบบมีระบบตรวจจับการทุจริตแบบเรียลไทม์</p>
-          </div>
-
-          {/* Quick Demo Logins Helper */}
-          <div className="w-full mt-4 pt-3 border-t border-outline-variant/30 space-y-1.5 text-left">
-            <p className="text-[10px] uppercase tracking-wider text-outline font-bold">
-              ⚡ บัญชีทดสอบด่วน (คลิกเพื่อกรอก):
-            </p>
-            <div className="flex flex-col gap-1">
-              <button
-                type="button"
-                onClick={() => handleQuickLogin("student01@netsechub.dev")}
-                className="px-2.5 py-1.5 rounded-lg bg-surface-container-lowest border border-outline-variant/30 hover:border-secondary/50 text-[11px] text-on-surface-variant hover:text-on-surface flex items-center justify-between transition-colors"
+          <div className="mt-3 w-full space-y-2">
+            {courses.map((c) => (
+              <div
+                key={c.code}
+                className="px-3 py-2 rounded-xl bg-surface-container-lowest/80 border border-outline-variant/30 text-[11px] text-on-surface-variant leading-relaxed"
               >
-                <span>🎓 นักศึกษา 01 (Student)</span>
-                <span className="font-mono text-[10px] text-secondary">student01@netsechub.dev</span>
-              </button>
-            </div>
+                <p className="font-semibold text-on-surface">รายวิชา</p>
+                <p className="text-sm text-on-surface">{c.title}</p>
+              </div>
+            ))}
+            <p className="text-[10px] text-outline font-mono">ระบบสอบแบบมีระบบตรวจจับการทุจริตแบบเรียลไทม์</p>
           </div>
         </div>
 
@@ -152,12 +164,32 @@ function LoginForm() {
             </div>
           </div>
 
-          <div>
-            <p className="text-xs font-semibold text-on-surface">เข้าสู่ระบบสำหรับนักเรียน/นักศึกษา</p>
-            <p className="text-[11px] text-on-surface-variant mt-0.5">เข้าดูบทเรียน เช็คชื่อ และเข้าทำแบบทดสอบ</p>
+          <div className="grid grid-cols-2 gap-1 rounded-xl border border-outline-variant/30 bg-surface-container-lowest p-1">
+            {(
+              [
+                { id: "student", label: "นักศึกษา", icon: "school" },
+                { id: "teacher", label: "อาจารย์ / ผู้ดูแลระบบ", icon: "admin_panel_settings" },
+              ] as const
+            ).map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => switchTo(t.id)}
+                className={`flex items-center justify-center gap-1.5 rounded-lg py-2.5 text-sm font-semibold transition-colors ${
+                  as === t.id
+                    ? t.id === "teacher"
+                      ? "bg-tertiary text-on-tertiary"
+                      : "bg-primary text-on-primary"
+                    : "text-on-surface-variant hover:text-on-surface"
+                }`}
+              >
+                <span className="material-symbols-outlined text-base">{t.icon}</span>
+                {t.label}
+              </button>
+            ))}
           </div>
 
-          {next && (
+          {next && !teacherMode && (
             <p className="text-xs text-on-surface-variant bg-surface-container-lowest border border-outline-variant/30 rounded-lg p-2.5">
               กรุณาเข้าสู่ระบบเพื่อเข้าสู่ห้องสอบ
             </p>
@@ -170,30 +202,63 @@ function LoginForm() {
             </p>
           )}
 
+          {teacherMode ? (
           <div className="space-y-3.5">
             <div>
-              <label className="text-xs text-on-surface-variant block mb-1 font-medium">อีเมล (Email)</label>
+              <label className="text-xs text-on-surface-variant block mb-1 font-medium">อีเมล</label>
               <input
                 type="email"
                 required
+                autoComplete="username"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="student01@netsechub.dev"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-container-lowest border border-outline-variant/40 text-sm text-on-surface placeholder:text-outline/60 focus:outline-none focus:border-primary transition-colors font-mono"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-container-lowest border border-outline-variant/40 text-base text-on-surface focus:outline-none focus:border-tertiary transition-colors font-mono"
               />
             </div>
             <div>
-              <label className="text-xs text-on-surface-variant block mb-1 font-medium">รหัสผ่าน (Password)</label>
+              <label className="text-xs text-on-surface-variant block mb-1 font-medium">รหัสผ่าน</label>
               <input
                 type="password"
                 required
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="••••••••"
-                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-container-lowest border border-outline-variant/40 text-sm text-on-surface focus:outline-none focus:border-primary transition-colors font-mono"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-container-lowest border border-outline-variant/40 text-base text-on-surface focus:outline-none focus:border-tertiary transition-colors"
               />
             </div>
           </div>
+          ) : (
+          <div className="space-y-3.5">
+            <div>
+              <label className="text-xs text-on-surface-variant block mb-1 font-medium">รหัสนักศึกษา</label>
+              <input
+                required
+                inputMode="numeric"
+                autoComplete="username"
+                value={studentCode}
+                onChange={(e) => setStudentCode(e.target.value)}
+                placeholder="68-020416-1001-0"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-container-lowest border border-outline-variant/40 text-base text-on-surface placeholder:text-outline/50 focus:outline-none focus:border-primary transition-colors font-mono"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-on-surface-variant block mb-1 font-medium">
+                รหัสเข้าสอบ <span className="text-outline">(ได้รับจากอาจารย์หลังเซ็นชื่อเข้าห้อง)</span>
+              </label>
+              <input
+                required
+                autoComplete="off"
+                autoCapitalize="characters"
+                spellCheck={false}
+                maxLength={12}
+                value={password}
+                onChange={(e) => setPassword(e.target.value.toUpperCase())}
+                placeholder="เช่น K7PX2M"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-surface-container-lowest border border-outline-variant/40 text-lg tracking-[0.3em] text-on-surface placeholder:tracking-normal placeholder:text-sm placeholder:text-outline/50 focus:outline-none focus:border-primary transition-colors font-mono"
+              />
+            </div>
+          </div>
+          )}
 
           {error && (
             <div className="p-3 rounded-lg bg-error/15 border border-error/30 text-xs text-error font-medium">
@@ -204,30 +269,13 @@ function LoginForm() {
           <button
             type="submit"
             disabled={loading}
-            className="w-full py-2.5 rounded-xl bg-primary text-on-primary font-semibold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 shadow-md shadow-primary/20 flex items-center justify-center gap-2"
+            className={`w-full py-2.5 rounded-xl font-semibold text-sm hover:opacity-90 transition-opacity disabled:opacity-50 shadow-md flex items-center justify-center gap-2 ${
+              teacherMode ? "bg-tertiary text-on-tertiary shadow-tertiary/20" : "bg-primary text-on-primary shadow-primary/20"
+            }`}
           >
-            <span>{loading ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}</span>
+            <span>{loading ? "กำลังเข้าสู่ระบบ..." : teacherMode ? "เข้าสู่ระบบหลังบ้าน" : "เข้าสู่ระบบ"}</span>
             <span className="material-symbols-outlined text-sm">login</span>
           </button>
-
-          <Link
-            href="/register"
-            className="block w-full text-center py-2.5 rounded-xl border border-secondary/40 text-secondary font-semibold text-xs hover:bg-secondary/10 transition-colors"
-          >
-            สมัครสมาชิกนักศึกษาใหม่ (Self Registration)
-          </Link>
-
-          <div className="flex items-center justify-between text-xs text-on-surface-variant pt-2">
-            <Link
-              href="/dashboard"
-              className="hover:text-on-surface transition-colors"
-            >
-              ← ดูหน้าบทเรียนทั่วไป
-            </Link>
-            <span className="text-[11px] text-outline">
-              รหัสผ่านเริ่มต้น: Password123!
-            </span>
-          </div>
         </form>
       </div>
     </div>

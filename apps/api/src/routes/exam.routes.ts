@@ -59,6 +59,12 @@ examRouter.get(
   examController.getAttemptViolations
 );
 examRouter.get(
+  "/attempts/:attemptId/answer-sheet",
+  requireAuth,
+  requireRole("TEACHER", "ADMIN"),
+  examController.getAttemptAnswerSheet
+);
+examRouter.get(
   "/:examId/proctor",
   requireAuth,
   requireRole("TEACHER", "ADMIN"),

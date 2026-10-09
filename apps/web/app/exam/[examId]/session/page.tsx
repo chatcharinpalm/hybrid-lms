@@ -7,6 +7,7 @@ import { isLoggedIn, loginUrl } from "@/lib/auth";
 import type { ExamPaper } from "@/types/exam";
 import { SecureExamShell } from "@/components/exam/SecureExamShell";
 import { QuestionPanel, type AnswerMap } from "@/components/exam/QuestionPanel";
+import { PaperExam } from "@/components/exam/PaperExam";
 import { ProctorMessageModal } from "@/components/exam/ProctorMessageModal";
 
 interface ProctorMessage {
@@ -20,8 +21,13 @@ interface LiveState {
   violationCount: number;
   currentQuestionIndex: number;
   questionSecondsLeft: number | null;
+  secondsLeft: number | null;
   messages: ProctorMessage[];
 }
+
+/** Answer-bank exams without per-question timers are shown as the paper booklet. */
+const isPaperExam = (paper: ExamPaper) =>
+  !paper.timePerQuestionSeconds && paper.questions.length > 0 && paper.questions.every((q) => q.type === "FILL_IN_BANK");
 
 export default function ExamSessionPage() {
   const { examId } = useParams<{ examId: string }>();
@@ -32,6 +38,8 @@ export default function ExamSessionPage() {
   const [currentIndex, setCurrentIndex] = useState(0);
   // Epoch ms when the current question's time runs out (null = no per-question limit).
   const [questionDeadline, setQuestionDeadline] = useState<number | null>(null);
+  // Epoch ms when the whole exam runs out (null on per-question timed exams).
+  const [examDeadline, setExamDeadline] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [serverViolationCount, setServerViolationCount] = useState<number | undefined>(undefined);
@@ -53,6 +61,8 @@ export default function ExamSessionPage() {
     apiFetch<ExamPaper>(`/api/exams/${examId}/attempts`, { method: "POST" })
       .then((data) => {
         setPaper(data);
+        setAnswers(data.answers ?? {});
+        setExamDeadline(typeof data.secondsLeft === "number" ? Date.now() + data.secondsLeft * 1000 : null);
         applyServerState(data.currentQuestionIndex, data.questionSecondsLeft);
       })
       .catch((err: Error) => setError(err.message));
@@ -65,6 +75,8 @@ export default function ExamSessionPage() {
   indexRef.current = currentIndex;
   const deadlineRef = useRef(questionDeadline);
   deadlineRef.current = questionDeadline;
+  const paperModeRef = useRef(false);
+  paperModeRef.current = paper ? isPaperExam(paper) : false;
 
   useEffect(() => {
     if (!attemptId) return;
@@ -82,6 +94,13 @@ export default function ExamSessionPage() {
         }
         setServerViolationCount(live.violationCount);
         if (live.messages.length > 0) setMessages((prev) => [...prev, ...live.messages]);
+
+        // Whole-exam time: follow the server when the proctor adds time.
+        if (typeof live.secondsLeft === "number") {
+          const serverDeadline = Date.now() + live.secondsLeft * 1000;
+          setExamDeadline((prev) => (prev === null || Math.abs(serverDeadline - prev) > 2000 ? serverDeadline : prev));
+        }
+        if (paperModeRef.current) return;
 
         // Follow the server if it moved on (timeout) or the proctor changed the time.
         if (live.currentQuestionIndex > indexRef.current) {
@@ -130,9 +149,10 @@ export default function ExamSessionPage() {
         { method: "POST", body: JSON.stringify({ currentQuestionIndex: newIndex }) }
       );
       applyServerState(state.currentQuestionIndex, state.questionSecondsLeft);
-    } catch {
+    } catch (err) {
       // Attempt already closed on the server (time ran out) — show the result.
-      router.replace(`/exam/${examId}/result`);
+      // Other errors (network blips) are ignored; the live poll catches up.
+      if (err instanceof ApiError && err.status === 409) router.replace(`/exam/${examId}/result`);
     }
   };
 
@@ -142,9 +162,15 @@ export default function ExamSessionPage() {
     setSubmitting(true);
     try {
       await apiFetch(`/api/exams/attempts/${paper.attemptId}/submit`, { method: "POST" });
-    } finally {
-      router.replace(`/exam/${examId}/result`);
+    } catch (err) {
+      // Paper not complete yet: stay on it (the paper shows what is missing).
+      if (err instanceof ApiError && err.status === 409 && err.message.startsWith("ยังตอบไม่ครบ")) {
+        submittedRef.current = false;
+        setSubmitting(false);
+        return;
+      }
     }
+    router.replace(`/exam/${examId}/result`);
   };
 
   if (error) {
@@ -175,29 +201,56 @@ export default function ExamSessionPage() {
     );
   }
 
+  const paperMode = isPaperExam(paper);
+
   return (
     <SecureExamShell
       title={paper.examTitle ?? "ข้อสอบ"}
-      hideOverallTimer={Boolean(paper.timePerQuestionSeconds)}
       attemptId={paper.attemptId}
-      startedAt={paper.startedAt}
-      durationMinutes={paper.durationMinutes}
+      deadline={examDeadline}
+      wide={paperMode}
+      student={paper.student}
+      facts={[
+        { icon: "format_list_numbered", label: `${paper.questions.length} ข้อ` },
+        {
+          icon: "schedule",
+          label: paper.timePerQuestionSeconds
+            ? `ข้อละ ${Math.round(paper.timePerQuestionSeconds / 60)} นาที`
+            : `${paper.durationMinutes} นาที`,
+        },
+        { icon: paperMode ? "auto_stories" : "quiz", label: paperMode ? "เติมคำ" : "ปรนัย" },
+      ]}
+      progress={{
+        done: paper.questions.filter((q) => answers[q.id]?.selectedOptionIds?.length || answers[q.id]?.textAnswer?.trim())
+          .length,
+        total: paper.questions.length,
+      }}
       security={paper.security}
       currentQuestionNumber={currentIndex + 1}
       serverViolationCount={serverViolationCount}
       onExpire={handleSubmit}
       onForceSubmit={handleSubmit}
     >
-      <QuestionPanel
-        questions={paper.questions}
-        answers={answers}
-        currentIndex={currentIndex}
-        timePerQuestionSeconds={paper.timePerQuestionSeconds ?? null}
-        questionDeadline={questionDeadline}
-        onAnswerChange={handleAnswerChange}
-        onQuestionChange={handleQuestionChange}
-        onSubmit={handleSubmit}
-      />
+      {paperMode ? (
+        <PaperExam
+          paper={paper}
+          answers={answers}
+          onAnswerChange={handleAnswerChange}
+          onPageChange={handleQuestionChange}
+          onSubmit={handleSubmit}
+        />
+      ) : (
+        <QuestionPanel
+          questions={paper.questions}
+          answers={answers}
+          currentIndex={currentIndex}
+          timePerQuestionSeconds={paper.timePerQuestionSeconds ?? null}
+          questionDeadline={questionDeadline}
+          onAnswerChange={handleAnswerChange}
+          onQuestionChange={handleQuestionChange}
+          onSubmit={handleSubmit}
+        />
+      )}
       <ProctorMessageModal message={messages[0] ?? null} onAcknowledge={() => setMessages((m) => m.slice(1))} />
     </SecureExamShell>
   );

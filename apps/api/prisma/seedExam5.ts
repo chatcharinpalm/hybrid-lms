@@ -1,5 +1,4 @@
 import { PrismaClient } from "@prisma/client";
-import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
@@ -267,129 +266,31 @@ const QUESTIONS: QuestionDef[] = [
   },
 ];
 
-const STUDENT_NAMES = [
-  { first: "กิตติพงษ์", last: "สุขเกษม" },
-  { first: "จิรวัฒน์", last: "แสงอรุณ" },
-  { first: "ชลธี", last: "วงษ์สวรรค์" },
-  { first: "ณัฐวุฒิ", last: "ปัญญาวงศ์" },
-  { first: "ทศพล", last: "เรืองโรจน์" },
-  { first: "ธนกฤต", last: "บุญส่ง" },
-  { first: "ธีรภัทร์", last: "ศิริชัย" },
-  { first: "นพดล", last: "แก้วมณี" },
-  { first: "ปวริศร", last: "คงมั่น" },
-  { first: "พงศธร", last: "จิตสง่า" },
-  { first: "ภานุพงศ์", last: "รัตนโกสินทร์" },
-  { first: "เมธาสิทธิ์", last: "ทองใบ" },
-  { first: "ยุทธนา", last: "คำดี" },
-  { first: "วรากร", last: "ชินวัตร" },
-  { first: "ศิรวิชญ์", last: "สุรวงศ์" },
-  { first: "สิทธิพงษ์", last: "ดวงแก้ว" },
-  { first: "อนิรุตต์", last: "ทักษิณ" },
-  { first: "เอกลักษณ์", last: "พิทักษ์" },
-  { first: "กัญญารัตน์", last: "เจริญสุข" },
-  { first: "ชลธิชา", last: "ศรีสว่าง" },
-  { first: "ณัชชา", last: "วิเศษศิลป์" },
-  { first: "ทิพวรรณ", last: "มีโชค" },
-  { first: "ธิดารัตน์", last: "พรหมประสิทธิ์" },
-  { first: "นภัสสร", last: "อินทร์ทอง" },
-  { first: "ปิยดา", last: "วงศ์ประเสริฐ" },
-  { first: "พิมพิศา", last: "เพชรดี" },
-  { first: "รพีพร", last: "จันทร์เพ็ญ" },
-  { first: "ลลิตา", last: "มณีวรรณ" },
-  { first: "วริศรา", last: "งามยิ่ง" },
-  { first: "ศุภัสสร", last: "สมบัติเจริญ" },
-];
-
 async function main() {
-  console.log("Seeding Chapter 5 Exam & 30 Students into XAMPP MySQL...");
-  const passwordHash = await bcrypt.hash("Password123!", 10);
-
-  // 1. Teacher
-  const teacher = await prisma.user.upsert({
-    where: { email: "teacher@netsechub.dev" },
-    update: {
-      firstName: "วิทวัส",
-      lastName: "ทิพย์สุวรรณ",
-      fullName: "ดร.วิทวัส ทิพย์สุวรรณ",
-      avatarUrl: "/teacher.png",
-    },
-    create: {
-      email: "teacher@netsechub.dev",
-      passwordHash,
-      firstName: "วิทวัส",
-      lastName: "ทิพย์สุวรรณ",
-      fullName: "ดร.วิทวัส ทิพย์สุวรรณ",
-      role: "TEACHER",
-      avatarUrl: "/teacher.png",
-    },
-  });
+  console.log("Seeding Chapter 5 Exam...");
+  // 1. Teacher (created by seed.ts)
+  const teacher = await prisma.user.findUniqueOrThrow({ where: { email: "teacher@netsechub.dev" } });
   console.log(`Teacher verified: ${teacher.fullName}`);
 
-  // 2. Course
-  const course = await prisma.course.upsert({
-    where: { code: "CPE-321" },
-    update: {},
-    create: {
-      code: "CPE-321",
-      title: "สถาปัตยกรรมคอมพิวเตอร์และระบบบัส (Microprocessor & Bus)",
-      description: "หลักการทำงานของ Microprocessor, System Bus, I/O Interfacing และระบบการควบคุมหน่วยความจำ",
-      termLabel: "2/2567",
-      teacherId: teacher.id,
-    },
-  });
-
-  // 3. Create 30 Students & Enroll them
-  const studentIds: string[] = [];
-  for (let i = 1; i <= 30; i++) {
-    const pad = String(i).padStart(2, "0");
-    const email = `student${pad}@netsechub.dev`;
-    const studentCode = `6701${String(i).padStart(4, "0")}`;
-    const info = STUDENT_NAMES[i - 1];
-
-    const student = await prisma.user.upsert({
-      where: { email },
-      update: {
-        studentCode,
-        faculty: "คณะวิศวกรรมศาสตร์",
-        major: "วิศวกรรมคอมพิวเตอร์",
-      },
-      create: {
-        email,
-        passwordHash,
-        firstName: info.first,
-        lastName: info.last,
-        fullName: `${info.first} ${info.last}`,
-        role: "STUDENT",
-        studentCode,
-        faculty: "คณะวิศวกรรมศาสตร์",
-        major: "วิศวกรรมคอมพิวเตอร์",
-      },
-    });
-
-    await prisma.enrollment.upsert({
-      where: { courseId_studentId: { courseId: course.id, studentId: student.id } },
-      update: {},
-      create: { courseId: course.id, studentId: student.id },
-    });
-
-    studentIds.push(student.id);
-  }
-  console.log(`Created & enrolled 30 students (student01 - student30)`);
-
-  // Also enroll default student@netsechub.dev
-  const defaultStudent = await prisma.user.findUnique({ where: { email: "student@netsechub.dev" } });
-  if (defaultStudent) {
-    await prisma.enrollment.upsert({
-      where: { courseId_studentId: { courseId: course.id, studentId: defaultStudent.id } },
-      update: {},
-      create: { courseId: course.id, studentId: defaultStudent.id },
-    });
-  }
-
+  // 2. Course (see data/courses.ts; run seedCourses.ts first). Students come
+  // from the real class list: seedRoster.ts.
+  const course = await prisma.course.findUniqueOrThrow({ where: { code: "020413106" } });
   // 4. Create Exam
-  const examTitle = "ข้อสอบท้ายบทที่ 5 เรื่อง Microprocessor and Bus";
+  // Title = the running header of the Word paper. The student screen renders the
+  // exam as that paper; the description is the "จำนวน ... ข้อ (...)" note after
+  // each part heading.
+  const examTitle = "แบบทดสอบ บทที่ 5 เรื่อง ไมโครโปรเซสเซอร์และการเชื่อมต่อระบบบัส (Microprocessor and Bus System)";
+  const examDescription = "จำนวน 42 ข้อ (วัตถุประสงค์ข้อที่ 1–21 ข้อละ 2 ข้อ)";
+  const timing = {
+    durationMinutes: 90, // whole paper, flip back and forth freely
+    timePerQuestionSeconds: null,
+    // No schedule: the room stays closed until a proctor opens it from the monitor page.
+    status: "CLOSED",
+    opensAt: null,
+    closesAt: null,
+  };
   let exam = await prisma.exam.findFirst({
-    where: { title: examTitle },
+    where: { title: { in: [examTitle, "ข้อสอบท้ายบทที่ 5 เรื่อง Microprocessor and Bus"] } },
   });
 
   if (exam) {
@@ -399,12 +300,12 @@ async function main() {
     await prisma.exam.update({
       where: { id: exam.id },
       data: {
-        timePerQuestionSeconds: 300,
+        title: examTitle,
+        description: examDescription,
+        ...timing,
         maxAttempts: 0, // unlimited retakes
         shuffleQuestions: true,
         shuffleOptions: true,
-        description:
-          "แบบทดสอบท้ายบทที่ 5 เรื่อง Microprocessor and Bus (จำนวน 42 ข้อ จำกัดเวลาข้อละ 5 นาที แบบเติมคำจากคลังคำตอบ รหัสคำตอบสุ่มใหม่ทุกข้อและไม่ซ้ำกันในแต่ละคน)",
       },
     });
     console.log("Updated existing exam questions (previous attempts cleared)");
@@ -413,18 +314,17 @@ async function main() {
       data: {
         courseId: course.id,
         title: examTitle,
-        description: "แบบทดสอบท้ายบทที่ 5 เรื่อง Microprocessor and Bus (จำนวน 42 ข้อ จำกัดเวลาข้อละ 5 นาที แบบเติมคำจากคลังคำตอบ รหัสคำตอบสุ่มใหม่ทุกข้อและไม่ซ้ำกันในแต่ละคน)",
-        durationMinutes: 210, // 42 questions * 5 minutes
+        description: examDescription,
+        ...timing,
         passScorePercent: 60,
         maxAttempts: 0, // unlimited retakes
-        status: "OPEN",
         requireFullscreen: true,
         blockClipboard: true,
         blockContextMenu: true,
         maxViolations: 3,
         shuffleQuestions: true,
+        // Option Bank codes (Code 01–42) map to different answers for every student.
         shuffleOptions: true,
-        timePerQuestionSeconds: 300, // 5 minutes per question, enforced server-side
       },
     });
     console.log(`Created exam: ${exam.id}`);
@@ -434,10 +334,11 @@ async function main() {
   for (let i = 0; i < QUESTIONS.length; i++) {
     const q = QUESTIONS[i];
     // Fill-in-the-blank from the shared answer bank, as in the Word paper: every
-    // question offers all 42 bank entries. The client shows them under per-student,
-    // per-question shuffled codes, so "Code 17" means something different on every screen.
+    // question offers all 42 bank entries. The server orders the bank per student,
+    // so "Code 17" means something different on every student's paper.
     const optionsData = Object.entries(OPTION_BANK).map(([code, label], idx) => ({
       label,
+      code,
       isCorrect: code === q.correctCode,
       order: idx,
     }));

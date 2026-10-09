@@ -37,7 +37,85 @@
 body.exam-lockdown {
   user-select: none;
   -webkit-user-select: none;
+  /* iPad/tablets: no long-press copy/share menu */
+  -webkit-touch-callout: none;
 }
 body.exam-lockdown img {
   pointer-events: none;
 }
+
+/* ── Exam desk: the surface the paper lies on ───────────────────── */
+.exam-desk {
+  background-color: #0b1326;
+  background-image:
+    radial-gradient(ellipse 70% 55% at 50% 0%, rgba(77, 142, 255, 0.16), transparent 70%),
+    radial-gradient(ellipse 50% 40% at 85% 100%, rgba(78, 222, 163, 0.07), transparent 70%),
+    radial-gradient(circle at 1px 1px, rgba(173, 198, 255, 0.07) 1px, transparent 0);
+  background-size: auto, auto, 24px 24px;
+  background-attachment: fixed;
+}
+
+/* ── Violation jump scare (components/exam/ViolationModal.tsx) ──────
+   The face slams in from tiny to oversized, the screen shakes, and a
+   single red flash fades out — one flash only, nothing strobes. */
+@keyframes jumpscare-face {
+  0% { transform: scale(0.15); opacity: 0; }
+  12% { transform: scale(1.35); opacity: 1; }
+  30% { transform: scale(1.12); }
+  100% { transform: scale(1.05); }
+}
+@keyframes jumpscare-shake {
+  0%, 100% { transform: translate(0, 0) rotate(0); }
+  10% { transform: translate(-18px, 10px) rotate(-2deg); }
+  20% { transform: translate(16px, -12px) rotate(2deg); }
+  30% { transform: translate(-12px, -8px) rotate(-1.5deg); }
+  40% { transform: translate(12px, 8px) rotate(1deg); }
+  50% { transform: translate(-6px, 4px); }
+  60% { transform: translate(6px, -4px); }
+  70% { transform: translate(-3px, 2px); }
+}
+@keyframes jumpscare-flash {
+  0% { opacity: 0.85; }
+  100% { opacity: 0; }
+}
+@keyframes jumpscare-text {
+  0% { transform: scale(3); opacity: 0; }
+  15% { transform: scale(0.9); opacity: 1; }
+  25% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: none; }
+}
+.jumpscare-face { animation: jumpscare-face 900ms cubic-bezier(0.2, 1.4, 0.4, 1) both; }
+.jumpscare-shake { animation: jumpscare-shake 700ms ease-out 60ms both; }
+.jumpscare-flash { animation: jumpscare-flash 600ms ease-out both; }
+.jumpscare-text { animation: jumpscare-text 700ms ease-out both; }
+.fade-up { animation: fade-up 300ms ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .jumpscare-face, .jumpscare-shake, .jumpscare-text { animation: none; }
+}
+
+/* ── Printing the sign-in sheet / code slips (backoffice/students):
+   only #print-area goes on paper, whatever app chrome surrounds it. */
+@media print {
+  @page { size: A4; margin: 12mm; }
+  body { background: #fff !important; }
+  body * { visibility: hidden; }
+  #print-area, #print-area * { visibility: visible; }
+  #print-area { position: absolute; inset: 0 auto auto 0; width: 100%; }
+}
+
+/* ── Paper page turn: a short slide in from the side being turned to ── */
+@keyframes page-in-next {
+  from { opacity: 0; transform: translateX(48px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes page-in-prev {
+  from { opacity: 0; transform: translateX(-48px); }
+  to { opacity: 1; transform: none; }
+}
+/* Ends on transform: none, so the text is never left on a scaled bitmap layer. */
+.page-in-next { animation: page-in-next 260ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+.page-in-prev { animation: page-in-prev 260ms cubic-bezier(0.2, 0.8, 0.2, 1); }

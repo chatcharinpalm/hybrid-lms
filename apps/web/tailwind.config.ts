@@ -42,6 +42,9 @@ const config: Config = {
       fontFamily: {
         sans: ["Inter", "sans-serif"],
         mono: ["JetBrains Mono", "monospace"],
+        // The exam paper's TH SarabunPSK, as its web counterpart Sarabun. Not the locally installed
+        // TH SarabunPSK: browsers place its Thai vowels and tone marks wrongly.
+        paper: ["Sarabun", "serif"],
       },
     },
   },

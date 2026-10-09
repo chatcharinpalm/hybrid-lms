@@ -84,7 +84,7 @@ export default function UploadMaterialPage() {
             {courses.length === 0 && <option value="">ยังไม่มีรายวิชา — สร้างรายวิชาก่อน</option>}
             {courses.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.code} — {c.title}
+                {c.title}
               </option>
             ))}
           </select>

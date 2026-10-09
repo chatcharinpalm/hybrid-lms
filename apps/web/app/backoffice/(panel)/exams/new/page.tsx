@@ -46,7 +46,7 @@ export default function NewExamPage() {
   const [description, setDescription] = useState("");
   const [durationMinutes, setDurationMinutes] = useState(60);
   const [passScorePercent, setPassScorePercent] = useState(60);
-  const [maxAttempts, setMaxAttempts] = useState(1);
+  const [maxAttempts, setMaxAttempts] = useState(0);
   const [requireFullscreen, setRequireFullscreen] = useState(true);
   const [blockClipboard, setBlockClipboard] = useState(true);
   const [blockContextMenu, setBlockContextMenu] = useState(true);
@@ -162,7 +162,7 @@ export default function NewExamPage() {
             {courses.length === 0 && <option value="">ยังไม่มีรายวิชา — สร้างรายวิชาก่อน</option>}
             {courses.map((c) => (
               <option key={c.id} value={c.id}>
-                {c.code} — {c.title}
+                {c.title}
               </option>
             ))}
           </select>
@@ -192,7 +192,7 @@ export default function NewExamPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <NumberField label="เวลาสอบ (นาที)" value={durationMinutes} onChange={setDurationMinutes} min={1} />
           <NumberField label="เกณฑ์ผ่าน (%)" value={passScorePercent} onChange={setPassScorePercent} min={0} max={100} />
-          <NumberField label="สิทธิ์สอบ (ครั้ง)" value={maxAttempts} onChange={setMaxAttempts} min={1} />
+          <NumberField label="สิทธิ์สอบ (ครั้ง, 0 = ไม่จำกัด)" value={maxAttempts} onChange={setMaxAttempts} min={0} />
         </div>
       </section>
 

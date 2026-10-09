@@ -31,6 +31,26 @@ export interface UseExamSecurityResult {
   syncViolationCount: (serverCount: number) => void;
 }
 
+// iPad Safari before 16.4 only has the webkit-prefixed fullscreen API; iPhones have none.
+type WebkitDocument = Document & { webkitFullscreenElement?: Element | null; webkitExitFullscreen?: () => Promise<void> };
+type WebkitElement = HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void };
+
+const fullscreenElement = () =>
+  typeof document === "undefined" ? null : document.fullscreenElement ?? (document as WebkitDocument).webkitFullscreenElement ?? null;
+
+/** Whether this device can lock the exam to fullscreen at all. */
+export function canFullscreen(): boolean {
+  if (typeof document === "undefined") return true;
+  const el = document.documentElement as WebkitElement;
+  return Boolean(el.requestFullscreen || el.webkitRequestFullscreen) && document.fullscreenEnabled !== false;
+}
+
+function exitFullscreen() {
+  const doc = document as WebkitDocument;
+  if (document.exitFullscreen) document.exitFullscreen().catch(() => undefined);
+  else doc.webkitExitFullscreen?.();
+}
+
 const CLIPBOARD_BLOCK_KEYS = new Set(["c", "v", "x"]);
 const DEVTOOLS_KEYS = new Set(["i", "j", "c", "u"]);
 
@@ -87,7 +107,9 @@ export function useExamSecurity({
   const requestEnterFullscreen = useCallback(async () => {
     suppressUntilRef.current = Date.now() + 700;
     try {
-      await document.documentElement.requestFullscreen();
+      const el = document.documentElement as WebkitElement;
+      if (el.requestFullscreen) await el.requestFullscreen();
+      else await el.webkitRequestFullscreen?.();
     } catch {
       // Fullscreen can be denied (e.g. iframe without allow="fullscreen").
       // The fullscreenchange listener below will keep reporting exits,
@@ -104,7 +126,7 @@ export function useExamSecurity({
     // the fullscreenchange event for *entering* fullscreen fired before
     // there was a listener to catch it. Sync the initial state directly
     // instead of waiting for a change event that already happened.
-    setIsFullscreen(document.fullscreenElement !== null);
+    setIsFullscreen(fullscreenElement() !== null);
 
     setIsAway(document.hidden || !document.hasFocus());
 
@@ -123,7 +145,7 @@ export function useExamSecurity({
     const handleFocus = () => setIsAway(false);
 
     const handleFullscreenChange = () => {
-      const active = document.fullscreenElement !== null;
+      const active = fullscreenElement() !== null;
       setIsFullscreen(active);
       if (!active && configRef.current.requireFullscreen) {
         report("FULLSCREEN_EXIT");
@@ -207,6 +229,7 @@ export function useExamSecurity({
     window.addEventListener("blur", handleBlur);
     window.addEventListener("focus", handleFocus);
     document.addEventListener("fullscreenchange", handleFullscreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullscreenChange);
     document.addEventListener("contextmenu", handleContextMenu);
     document.addEventListener("selectstart", handleSelectStart);
     document.addEventListener("copy", handleCopy);
@@ -220,15 +243,14 @@ export function useExamSecurity({
       window.removeEventListener("blur", handleBlur);
       window.removeEventListener("focus", handleFocus);
       document.removeEventListener("fullscreenchange", handleFullscreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullscreenChange);
       document.removeEventListener("contextmenu", handleContextMenu);
       document.removeEventListener("selectstart", handleSelectStart);
       document.removeEventListener("copy", handleCopy);
       document.removeEventListener("cut", handleCut);
       document.removeEventListener("paste", handlePaste);
       document.removeEventListener("keydown", handleKeyDown, { capture: true });
-      if (document.fullscreenElement) {
-        document.exitFullscreen().catch(() => undefined);
-      }
+      if (fullscreenElement()) exitFullscreen();
     };
     // `report` is stable (empty deps); config and callbacks are read through refs.
   }, [enabled, report]);

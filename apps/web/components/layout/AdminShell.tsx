@@ -6,6 +6,7 @@ import { getStoredFullName, logout } from "@/lib/auth";
 
 const NAV_ITEMS = [
   { href: "/backoffice/monitor", label: "คุมสอบ", icon: "live_tv" },
+  { href: "/backoffice/students", label: "รายชื่อ & รหัสเข้าสอบ", icon: "badge" },
   { href: "/backoffice/courses/new", label: "สร้างรายวิชา", icon: "add_business" },
   { href: "/backoffice/exams/new", label: "สร้างข้อสอบ", icon: "post_add" },
   { href: "/backoffice/materials/upload", label: "อัพโหลดเอกสาร", icon: "upload_file" },
@@ -21,7 +22,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
 
   const handleLogout = () => {
     logout();
-    window.location.href = "/backoffice/login";
+    window.location.href = "/login?as=teacher";
   };
 
   return (

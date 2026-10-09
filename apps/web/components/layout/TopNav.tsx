@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 import { getStoredFullName, isLoggedIn, loginUrl, logout } from "@/lib/auth";
 
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "หน้าแรก", icon: "dashboard" },
   { href: "/courses", label: "คอร์สเรียน", icon: "cast_for_education" },
   { href: "/attendance", label: "เช็คชื่อเข้าเรียน", icon: "co_present" },
   { href: "/exams", label: "ศูนย์สอบ", icon: "assignment_turned_in" },
@@ -31,13 +30,13 @@ export function TopNav() {
 
   const handleLogout = () => {
     logout();
-    window.location.href = "/dashboard";
+    window.location.href = "/login";
   };
 
   return (
     <header className="sticky top-0 z-50 bg-surface-container-low/95 backdrop-blur border-b border-outline-variant/30">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-        <Link href="/dashboard" className="flex items-center gap-2.5 shrink-0">
+        <Link href="/exams" className="flex items-center gap-2.5 shrink-0">
           <div className="w-8 h-8 rounded bg-primary/10 border border-primary/25 flex items-center justify-center text-primary">
             <span className="material-symbols-outlined text-lg">school</span>
           </div>
