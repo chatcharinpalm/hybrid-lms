@@ -56,8 +56,9 @@ export async function setExamStatus(examId: string, status: "OPEN" | "CLOSED", a
       where: { examId, status: "IN_PROGRESS" },
       select: { id: true },
     });
-    for (const a of running) {
-      await gradeAndSubmit(a.id, "SUBMITTED", "EXAM_CLOSED");
+    // A few at a time: a full room closes in seconds without flooding the database.
+    for (let i = 0; i < running.length; i += 5) {
+      await Promise.all(running.slice(i, i + 5).map((a) => gradeAndSubmit(a.id, "SUBMITTED", "EXAM_CLOSED")));
     }
     submitted = running.length;
   }

@@ -133,11 +133,28 @@ export default function ExamSessionPage() {
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
     if (!paper) return;
 
-    // Fire-and-forget autosave; the server rejects answers for questions whose time is up.
-    apiFetch(`/api/exams/attempts/${paper.attemptId}/answers`, {
-      method: "POST",
-      body: JSON.stringify({ questionId, ...value }),
-    }).catch(() => undefined);
+    // Autosave, retried through brief network/server hiccups. The server's own
+    // refusals (409: time up, already answered) are final and not retried.
+    const attemptId = paper.attemptId;
+    const save = async () => {
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          await apiFetch(`/api/exams/attempts/${attemptId}/answers`, {
+            method: "POST",
+            body: JSON.stringify({ questionId, ...value }),
+          });
+          return true;
+        } catch (err) {
+          if (err instanceof ApiError && err.status < 500) return err.status === 409;
+          await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+        }
+      }
+      return false;
+    };
+    save().then((saved) => {
+      // Never show a blank as answered when the server doesn't have it: open it again.
+      if (!saved) setAnswers((prev) => ({ ...prev, [questionId]: { selectedOptionIds: [] } }));
+    });
   };
 
   const handleQuestionChange = async (newIndex: number) => {

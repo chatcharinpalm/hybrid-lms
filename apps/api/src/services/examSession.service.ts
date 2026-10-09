@@ -398,12 +398,19 @@ export async function gradeAndSubmit(
     where: { id: attemptId },
     include: {
       answers: true,
-      exam: { include: { questions: { include: { options: true } } } },
+      exam: {
+        include: {
+          // Only the correct options are needed to mark; answer-bank questions carry ~50 options each.
+          questions: { include: { options: { where: { isCorrect: true }, select: { id: true, isCorrect: true } } } },
+        },
+      },
     },
   });
 
   let earned = 0;
   let total = 0;
+  // Answers grouped by result, written in a few queries instead of one per question.
+  const marks = new Map<string, { isCorrect: boolean; pointsAwarded: number; ids: string[] }>();
 
   for (const question of attempt.exam.questions) {
     total += question.points;
@@ -425,10 +432,14 @@ export async function gradeAndSubmit(
     const pointsAwarded = correct ? question.points : 0;
     earned += pointsAwarded;
 
-    await prisma.examAnswer.update({
-      where: { id: answer.id },
-      data: { isCorrect: correct, pointsAwarded },
-    });
+    const key = `${correct}:${pointsAwarded}`;
+    const group = marks.get(key) ?? { isCorrect: correct, pointsAwarded, ids: [] };
+    group.ids.push(answer.id);
+    marks.set(key, group);
+  }
+
+  for (const { isCorrect, pointsAwarded, ids } of marks.values()) {
+    await prisma.examAnswer.updateMany({ where: { id: { in: ids } }, data: { isCorrect, pointsAwarded } });
   }
 
   const scorePercent = total > 0 ? Math.round((earned / total) * 10000) / 100 : 0;

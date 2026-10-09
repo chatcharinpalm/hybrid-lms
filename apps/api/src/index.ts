@@ -1,4 +1,7 @@
 import express from "express";
+// Errors thrown in async route handlers reach errorHandler instead of crashing
+// the process (which on Vercel would hang every request on that instance).
+import "express-async-errors";
 import cors from "cors";
 import helmet from "helmet";
 import cookieParser from "cookie-parser";
