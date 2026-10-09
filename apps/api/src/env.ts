@@ -11,7 +11,9 @@ export const env = {
   // Comma-separated for deploys that need both a prod and preview frontend
   // origin (e.g. "https://app.vercel.app,http://localhost:3000").
   corsOrigins: (process.env.CORS_ORIGIN ?? "http://localhost:3000").split(",").map((o) => o.trim()),
-  uploadDir: process.env.UPLOAD_DIR ?? "uploads",
+  // Vercel functions can only write to /tmp (and it doesn't last): uploaded
+  // course documents need real file storage before that feature is used there.
+  uploadDir: process.env.UPLOAD_DIR ?? (process.env.VERCEL ? "/tmp/uploads" : "uploads"),
   jwt: {
     accessSecret: required("JWT_ACCESS_SECRET"),
     refreshSecret: required("JWT_REFRESH_SECRET"),

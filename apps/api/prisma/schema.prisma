@@ -1,26 +1,24 @@
 // Hybrid LMS — Core Data Model
 //
-// Points at PostgreSQL for the real deployment (see README's "Deploying"
-// section for the hosted-Postgres setup). Local dev during this project's
-// build phase ran on SQLite instead, because this machine's Application
-// Control policy blocks running a standalone Postgres server process
-// (Prisma's own query engine loads in-process and wasn't affected, which is
-// why Prisma-backed dev was possible here at all). Enum/Json/scalar-list
-// fields below are still modeled as plain `String` columns (JSON-encoded
-// where noted) rather than switched to Postgres's native equivalents,
-// because that's what the SQLite phase required and switching back is a
-// cosmetic-only change — see apps/api/src/constants.ts for the string-union
-// TypeScript types these map to. To run this against local SQLite again
-// (e.g. on a machine without Postgres access), change `provider` below back
-// to "sqlite" and point DATABASE_URL at a "file:./dev.db"-style path.
+// Runs on Supabase Postgres, both the real site and development (a separate
+// Supabase project — this machine can't run a Postgres server itself). Enum/
+// Json/scalar-list fields are plain `String` columns (JSON-encoded where
+// noted), a leftover of earlier SQLite/MySQL phases — see
+// apps/api/src/constants.ts for the string-union TypeScript types they map to.
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // rhel-openssl-3.0.x: the runtime of the API's Vercel functions.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
+// Supabase Postgres. DATABASE_URL = the pooled "Transaction" connection
+// (port 6543, ?pgbouncer=true&connection_limit=1) used by the serverless API;
+// DIRECT_URL = the direct/"Session" connection (port 5432) used by `prisma db push`.
 datasource db {
-  provider = "mysql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ─────────────────────────────────────────────────────────────

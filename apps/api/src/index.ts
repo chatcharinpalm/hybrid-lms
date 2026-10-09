@@ -29,7 +29,12 @@ app.use("/api/students", studentRouter);
 
 app.use(errorHandler);
 
-app.listen(env.port, () => {
-  // eslint-disable-next-line no-console
-  console.log(`API listening on http://localhost:${env.port}`);
-});
+// On Vercel the app is exported and run as a serverless function; elsewhere it listens.
+if (!process.env.VERCEL) {
+  app.listen(env.port, () => {
+    // eslint-disable-next-line no-console
+    console.log(`API listening on http://localhost:${env.port}`);
+  });
+}
+
+export default app;

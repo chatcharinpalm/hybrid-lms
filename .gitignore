@@ -14,3 +14,11 @@ apps/api/prisma/*.db-journal
 
 # Real student names/IDs: kept out of git (seed with prisma/seedRoster.ts from a local copy)
 apps/api/prisma/data/roster.json
+
+# Any env file (production DB passwords etc.), except the committed examples
+.env.*
+!.env.example
+!.env.local.example
+
+# Vercel CLI project links
+.vercel
