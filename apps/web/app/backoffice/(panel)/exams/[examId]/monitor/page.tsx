@@ -7,6 +7,7 @@ import { apiFetch } from "@/lib/api";
 import { BroadcastButton, RowActions, StudentControls } from "@/components/backoffice/StudentControls";
 import { StudentWall } from "@/components/backoffice/StudentWall";
 import { AnswerSheet } from "@/components/backoffice/AnswerSheet";
+import { AUDIT_ACTION_TH, ENDED_REASON_TH, VIOLATION_TRANSLATION, exportExamExcel } from "@/lib/exportExamExcel";
 
 interface ProctorStudent {
   studentId: string;
@@ -71,24 +72,6 @@ interface ProctorData {
   };
 }
 
-const ENDED_REASON_TH: Record<string, string> = {
-  STUDENT: "ผู้สอบกดส่งเอง",
-  TIMEOUT: "หมดเวลา",
-  VIOLATIONS: "โกงครบกำหนด",
-  ADMIN_FORCED: "ผู้คุมสอบสั่งส่ง",
-  EXAM_CLOSED: "ปิดห้องสอบ",
-};
-
-const AUDIT_ACTION_TH: Record<string, string> = {
-  EXAM_OPEN: "เปิดห้องสอบ",
-  EXAM_CLOSED: "ปิดห้องสอบ",
-  ATTEMPT_FORCE_SUBMIT: "บังคับส่ง",
-  ATTEMPT_RESET: "รีเซ็ตให้สอบใหม่",
-  ATTEMPT_FORGIVE_VIOLATIONS: "ล้างการโกง",
-  ATTEMPT_ADD_TIME: "เพิ่มเวลา",
-  ATTEMPT_MESSAGE: "ส่งข้อความเตือน",
-};
-
 interface AuditEntry {
   id: string;
   action: string;
@@ -96,19 +79,6 @@ interface AuditEntry {
   createdAt: string;
   metadata: Record<string, unknown> | null;
 }
-
-const VIOLATION_TRANSLATION: Record<string, string> = {
-  TAB_HIDDEN: "สลับแท็บ / ย่อหน้าต่าง",
-  WINDOW_BLUR: "คลิกออกนอกหน้าต่างสอบ",
-  FULLSCREEN_EXIT: "ออกจากโหมดเต็มหน้าจอ",
-  COPY_ATTEMPT: "พยายามคัดลอกข้อความ (Copy)",
-  PASTE_ATTEMPT: "พยายามวางข้อความ (Paste)",
-  CUT_ATTEMPT: "พยายามตัดข้อความ (Cut)",
-  CONTEXT_MENU_ATTEMPT: "เปิดเมนูคลิกขวา",
-  DEVTOOLS_SHORTCUT: "พยายามเปิด DevTools / F12",
-  PRINT_SCREEN: "พยายามจับภาพหน้าจอ",
-  MULTIPLE_DISPLAYS_DETECTED: "ต่อจอภาพหลายจอ",
-};
 
 export default function LiveProctorPage() {
   const { examId } = useParams<{ examId: string }>();
@@ -129,6 +99,7 @@ export default function LiveProctorPage() {
   const [cheatersFirst, setCheatersFirst] = useState(false);
   const [room, setRoom] = useState<string>("ALL");
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [exporting, setExporting] = useState<string | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -343,6 +314,42 @@ export default function LiveProctorPage() {
     </div>
   );
 
+  // The record for the paperwork: exports the room tab currently chosen (or every room).
+  const exportExcel = async () => {
+    setExporting("กำลังเตรียม...");
+    try {
+      await exportExamExcel({
+        examTitle: data.exam.title,
+        totalQuestions: data.exam.totalQuestions,
+        maxViolations: data.exam.maxViolations,
+        roomLabel: room === "ALL" ? "ทุกห้อง" : room,
+        students: roomStudents,
+        audit: auditLog,
+        onProgress: (done, total) => setExporting(`โหลดคำตอบ ${done}/${total}`),
+      });
+      showNotice("ส่งออกไฟล์ Excel แล้ว");
+    } catch (err) {
+      setNotice(err instanceof Error ? `ส่งออกไม่สำเร็จ: ${err.message}` : "ส่งออกไม่สำเร็จ");
+    } finally {
+      setExporting(null);
+    }
+  };
+
+  const exportButton = (
+    <button
+      type="button"
+      disabled={Boolean(exporting)}
+      onClick={exportExcel}
+      title={`ผลสอบ คำตอบรายข้อ การทุจริต และการสั่งการ — ${room === "ALL" ? "ทุกห้อง" : `ห้อง ${room}`}`}
+      className="px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 bg-emerald-600/15 text-emerald-400 border-emerald-500/40 hover:bg-emerald-600/25 disabled:opacity-60"
+    >
+      <span className={`material-symbols-outlined text-sm ${exporting ? "animate-spin" : ""}`}>
+        {exporting ? "sync" : "download"}
+      </span>
+      {exporting ?? `Export Excel${room === "ALL" ? "" : ` (${room})`}`}
+    </button>
+  );
+
   const wallToolbar = (
     <div className="flex flex-wrap items-center gap-2">
       {roomTabs}
@@ -392,6 +399,7 @@ export default function LiveProctorPage() {
             <b className="text-error">{data.summary.autoSubmitted}</b> / {data.summary.totalStudents} คน
           </span>
           {roomControls}
+          {exportButton}
           {wallToolbar}
         </div>
       )}
@@ -427,6 +435,7 @@ export default function LiveProctorPage() {
         {/* Action Controls */}
         <div className="flex flex-wrap items-center gap-2">
           {roomControls}
+          {exportButton}
           <button
             type="button"
             onClick={() => setAutoRefresh(!autoRefresh)}

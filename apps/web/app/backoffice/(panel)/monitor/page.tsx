@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
+import { exportExamExcelById } from "@/lib/exportExamExcel";
 
 interface CourseExam {
   id: string;
@@ -11,6 +12,38 @@ interface CourseExam {
   durationMinutes: number;
   status: string;
   courseId: string;
+}
+
+function ExportExcelButton({ examId }: { examId: string }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const run = async () => {
+    setBusy("กำลังเตรียม...");
+    setError(null);
+    try {
+      await exportExamExcelById(examId, (done, total) => setBusy(`โหลดคำตอบ ${done}/${total}`));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "ส่งออกไม่สำเร็จ");
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <button
+      type="button"
+      disabled={Boolean(busy)}
+      onClick={run}
+      title={error ?? "ผลสอบ คำตอบรายข้อ การทุจริต และการสั่งการ (ทุกห้อง)"}
+      className={`px-3 py-1.5 rounded-lg text-xs font-bold border flex items-center gap-1.5 disabled:opacity-60 ${
+        error
+          ? "bg-error/10 text-error border-error/40"
+          : "bg-emerald-600/15 text-emerald-400 border-emerald-500/40 hover:bg-emerald-600/25"
+      }`}
+    >
+      <span className={`material-symbols-outlined text-sm ${busy ? "animate-spin" : ""}`}>{busy ? "sync" : "download"}</span>
+      {busy ?? (error ? "ส่งออกไม่สำเร็จ ลองใหม่" : "Export Excel")}
+    </button>
+  );
 }
 
 export default function AdminMonitorHubPage() {
@@ -60,13 +93,16 @@ export default function AdminMonitorHubPage() {
             </p>
           </div>
 
-          <Link
-            href="/backoffice/exams/667e74ba-a2ee-499c-9ce9-c8e7c32ab029/monitor"
-            className="px-5 py-2.5 rounded-xl bg-primary text-on-primary font-bold text-xs hover:opacity-90 transition-opacity flex items-center gap-2 shadow-lg shadow-primary/20 shrink-0"
-          >
-            <span className="material-symbols-outlined text-sm">live_tv</span>
-            <span>เปิดหน้าคุมสอบ</span>
-          </Link>
+          <div className="flex items-center gap-2 shrink-0">
+            <ExportExcelButton examId="667e74ba-a2ee-499c-9ce9-c8e7c32ab029" />
+            <Link
+              href="/backoffice/exams/667e74ba-a2ee-499c-9ce9-c8e7c32ab029/monitor"
+              className="px-5 py-2.5 rounded-xl bg-primary text-on-primary font-bold text-xs hover:opacity-90 transition-opacity flex items-center gap-2 shadow-lg shadow-primary/20"
+            >
+              <span className="material-symbols-outlined text-sm">live_tv</span>
+              <span>เปิดหน้าคุมสอบ</span>
+            </Link>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-2 text-xs">
@@ -112,13 +148,16 @@ export default function AdminMonitorHubPage() {
                     เวลา: {ex.durationMinutes} นาที • สถานะ: {ex.status}
                   </p>
                 </div>
-                <Link
-                  href={`/backoffice/exams/${ex.id}/monitor`}
-                  className="px-3 py-1.5 rounded-lg bg-surface-container-highest hover:bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface hover:text-primary transition-colors flex items-center gap-1.5 shrink-0"
-                >
-                  <span className="material-symbols-outlined text-sm">visibility</span>
-                  <span>คุมสอบ</span>
-                </Link>
+                <div className="flex items-center gap-2 shrink-0">
+                  <ExportExcelButton examId={ex.id} />
+                  <Link
+                    href={`/backoffice/exams/${ex.id}/monitor`}
+                    className="px-3 py-1.5 rounded-lg bg-surface-container-highest hover:bg-surface-container-high border border-outline-variant/30 text-xs text-on-surface hover:text-primary transition-colors flex items-center gap-1.5"
+                  >
+                    <span className="material-symbols-outlined text-sm">visibility</span>
+                    <span>คุมสอบ</span>
+                  </Link>
+                </div>
               </div>
             ))}
           </div>
