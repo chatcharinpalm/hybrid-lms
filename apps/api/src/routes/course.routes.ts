@@ -15,6 +15,12 @@ export const courseRouter = Router();
 courseRouter.get("/", optionalAuth, courseController.listCourses);
 courseRouter.get("/by-code/:code/instructor", courseController.getCourseInstructor);
 courseRouter.post("/", requireAuth, requireRole("TEACHER", "ADMIN"), courseController.createCourse);
+courseRouter.post(
+  "/:courseId/visibility",
+  requireAuth,
+  requireRole("TEACHER", "ADMIN"),
+  courseController.setCourseVisibility
+);
 courseRouter.get("/:courseId/materials", courseController.listMaterials);
 courseRouter.post(
   "/:courseId/materials",

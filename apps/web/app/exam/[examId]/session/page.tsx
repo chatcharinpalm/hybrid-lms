@@ -8,6 +8,7 @@ import type { ExamPaper } from "@/types/exam";
 import { SecureExamShell } from "@/components/exam/SecureExamShell";
 import { QuestionPanel, type AnswerMap } from "@/components/exam/QuestionPanel";
 import { PaperExam } from "@/components/exam/PaperExam";
+import { DocumentExam } from "@/components/exam/DocumentExam";
 import { ProctorMessageModal } from "@/components/exam/ProctorMessageModal";
 
 interface ProctorMessage {
@@ -25,9 +26,10 @@ interface LiveState {
   messages: ProctorMessage[];
 }
 
-/** Answer-bank exams without per-question timers are shown as the paper booklet. */
+/** Imported documents, and answer-bank exams without per-question timers, are shown as paper. */
 const isPaperExam = (paper: ExamPaper) =>
-  !paper.timePerQuestionSeconds && paper.questions.length > 0 && paper.questions.every((q) => q.type === "FILL_IN_BANK");
+  !!paper.document ||
+  (!paper.timePerQuestionSeconds && paper.questions.length > 0 && paper.questions.every((q) => q.type === "FILL_IN_BANK"));
 
 export default function ExamSessionPage() {
   const { examId } = useParams<{ examId: string }>();
@@ -130,6 +132,7 @@ export default function ExamSessionPage() {
   }, [attemptId, examId, router]);
 
   const handleAnswerChange = (questionId: string, value: AnswerMap[string]) => {
+    const previous = answers[questionId];
     setAnswers((prev) => ({ ...prev, [questionId]: value }));
     if (!paper) return;
 
@@ -152,8 +155,8 @@ export default function ExamSessionPage() {
       return false;
     };
     save().then((saved) => {
-      // Never show a blank as answered when the server doesn't have it: open it again.
-      if (!saved) setAnswers((prev) => ({ ...prev, [questionId]: { selectedOptionIds: [] } }));
+      // Never show an answer the server doesn't have: back to what it last saved.
+      if (!saved) setAnswers((prev) => ({ ...prev, [questionId]: previous ?? { selectedOptionIds: [] } }));
     });
   };
 
@@ -235,7 +238,7 @@ export default function ExamSessionPage() {
             ? `ข้อละ ${Math.round(paper.timePerQuestionSeconds / 60)} นาที`
             : `${paper.durationMinutes} นาที`,
         },
-        { icon: paperMode ? "auto_stories" : "quiz", label: paperMode ? "เติมคำ" : "ปรนัย" },
+        { icon: paperMode ? "auto_stories" : "quiz", label: paper.document ? "ตามเอกสาร" : paperMode ? "เติมคำ" : "ปรนัย" },
       ]}
       progress={{
         done: paper.questions.filter((q) => answers[q.id]?.selectedOptionIds?.length || answers[q.id]?.textAnswer?.trim())
@@ -248,7 +251,15 @@ export default function ExamSessionPage() {
       onExpire={handleSubmit}
       onForceSubmit={handleSubmit}
     >
-      {paperMode ? (
+      {paper.document ? (
+        <DocumentExam
+          paper={paper}
+          answers={answers}
+          onAnswerChange={handleAnswerChange}
+          onPageChange={handleQuestionChange}
+          onSubmit={handleSubmit}
+        />
+      ) : paperMode ? (
         <PaperExam
           paper={paper}
           answers={answers}

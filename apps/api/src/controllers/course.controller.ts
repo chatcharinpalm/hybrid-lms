@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../prisma";
 
@@ -18,20 +19,46 @@ export async function getCourseInstructor(req: Request, res: Response) {
 }
 
 export async function listCourses(req: Request, res: Response) {
-  // Public/anonymous browsing shows the full catalog. A logged-in caller
+  // Public/anonymous browsing shows the visible catalog. A logged-in caller
   // gets a personalized view instead (their enrollments, or the courses
-  // they teach) so the admin/exam pages still scope correctly.
-  if (!req.user) {
-    return res.json(await prisma.course.findMany());
-  }
-
-  const courses =
-    req.user.role === "STUDENT"
-      ? await prisma.course.findMany({ where: { enrollments: { some: { studentId: req.user.id } } } })
+  // they teach) so the admin/exam pages still scope correctly. Hidden
+  // courses are left out for everyone but staff.
+  const where: Prisma.CourseWhereInput = !req.user
+    ? { isHidden: false }
+    : req.user.role === "STUDENT"
+      ? { isHidden: false, enrollments: { some: { studentId: req.user.id } } }
       : req.user.role === "ADMIN"
-        ? await prisma.course.findMany()
-        : await prisma.course.findMany({ where: { teacherId: req.user.id } });
-  return res.json(courses);
+        ? {}
+        : { teacherId: req.user.id };
+
+  const courses = await prisma.course.findMany({
+    where,
+    orderBy: { createdAt: "asc" },
+    // Exam statuses feed the course cards (how many exams, how many rooms open now).
+    include: { exams: { select: { status: true } } },
+  });
+  return res.json(
+    courses.map(({ exams, ...c }) => ({
+      ...c,
+      examCount: exams.length,
+      openExamCount: exams.filter((e) => e.status === "OPEN").length,
+    }))
+  );
+}
+
+/** Back office: hide a course from students, or show it again. */
+export async function setCourseVisibility(req: Request, res: Response) {
+  const { isHidden } = z.object({ isHidden: z.boolean() }).parse(req.body);
+  const course = await prisma.course.update({ where: { id: req.params.courseId }, data: { isHidden } });
+  await prisma.auditLog.create({
+    data: {
+      actorId: req.user!.id,
+      action: isHidden ? "COURSE_HIDDEN" : "COURSE_SHOWN",
+      entity: "Course",
+      entityId: course.id,
+    },
+  });
+  return res.json(course);
 }
 
 const createCourseSchema = z.object({

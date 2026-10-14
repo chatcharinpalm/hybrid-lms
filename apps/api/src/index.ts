@@ -12,6 +12,7 @@ import { examRouter } from "./routes/exam.routes";
 import { attendanceRouter } from "./routes/attendance.routes";
 import { courseRouter } from "./routes/course.routes";
 import { studentRouter } from "./routes/student.routes";
+import { settingsRouter } from "./routes/settings.routes";
 import { errorHandler } from "./middleware/errorHandler";
 import { prisma } from "./prisma";
 
@@ -19,7 +20,8 @@ const app = express();
 
 app.use(helmet());
 app.use(cors({ origin: env.corsOrigins, credentials: true }));
-app.use(express.json());
+// Imported exam documents carry their pictures (Vercel caps a request at 4.5 MB).
+app.use(express.json({ limit: "4mb" }));
 app.use(cookieParser());
 app.use("/uploads", express.static(path.resolve(env.uploadDir)));
 
@@ -36,6 +38,7 @@ app.use("/api/exams", examRouter);
 app.use("/api/attendance", attendanceRouter);
 app.use("/api/courses", courseRouter);
 app.use("/api/students", studentRouter);
+app.use("/api/settings", settingsRouter);
 
 app.use(errorHandler);
 

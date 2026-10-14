@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ExamOption, ExamPaper, ExamQuestion } from "@/types/exam";
 import type { AnswerMap } from "./QuestionPanel";
+import { BANK_PANEL_SHIFT, BankPanel } from "./BankPanel";
 
 /** A4 at 96 dpi (210 × 297 mm); margins about 15 mm. */
 const PAGE_W = 794;
@@ -19,6 +20,8 @@ const CONTENT_H = PAGE_H - PAD_TOP - PAD_BOTTOM - HEADER_H - 12;
 const SIDE = 96;
 
 const BLANK = "______";
+/** Body text of the sheet; the measuring copy must use the same. */
+const PAPER_TEXT = "text-[19px] leading-[1.65]";
 
 interface PaperExamProps {
   paper: ExamPaper;
@@ -47,10 +50,11 @@ type Block =
   | { key: string; kind: "question"; index: number };
 
 /**
- * The exam as the Word paper: one A4 sheet at a time, at A4 size and never
- * enlarged, so the writing is no bigger than on paper and hard to read from
- * the seats behind. Pages are cut by measuring every block at print width and
- * turned with a short slide.
+ * The exam as the Word paper: one A4 sheet at a time, shrunk so the whole
+ * sheet fits the screen without scrolling and never enlarged past A4, so the
+ * writing is no bigger than on paper and hard to read from the seats behind.
+ * Pages are cut by measuring every block at print width and turned with a
+ * short slide.
  *
  * Against copying, the server deals every student their own question order
  * and their own meaning for each Option Bank code (the codes look like the
@@ -112,22 +116,26 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
     document.fonts?.ready.then(paginate).catch(() => undefined);
   }, [paginate]);
 
-  // ── Viewer: true A4 size, shrunk only when the screen is narrower than a sheet ──
+  // ── Viewer: one whole sheet per screen, shrunk to fit (never enlarged past A4) ──
   const viewerRef = useRef<HTMLDivElement>(null);
-  const [viewportW, setViewportW] = useState(0);
+  const [viewport, setViewport] = useState({ w: 0, h: 0 });
   useLayoutEffect(() => {
     const el = viewerRef.current;
     if (!el) return;
-    const measure = () => setViewportW(el.clientWidth);
+    const measure = () => setViewport({ w: el.clientWidth, h: el.clientHeight });
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
+  const viewportW = viewport.w;
   // Tablets and phones: no room for side arrows, so the sheet fills the width (arrows sit over its margins).
   const compact = viewportW > 0 && viewportW < 1100;
   const gutter = compact ? 8 : SIDE;
-  const scale = viewportW > 0 ? Math.max(0.3, Math.min(1, (viewportW - gutter * 2) / PAGE_W)) : 1;
+  const fitW = (viewportW - gutter * 2) / PAGE_W;
+  // The whole page shows without scrolling, except on phones held upright where that would be unreadably small.
+  const fitH = (viewport.h - (compact ? 16 : 24)) / PAGE_H;
+  const scale = viewportW > 0 ? Math.max(0.3, Math.min(1, fitW, Math.max(fitH, compact ? 0.42 : 0.3))) : 1;
 
   const pageList = pages ?? [];
   const totalPages = pageList.length;
@@ -143,10 +151,9 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pages]);
 
-  const [bankOpen, setBankOpen] = useState(false);
+  // The Option Bank panel: open for a blank (its question id), or just to browse (null).
+  const [panel, setPanel] = useState<{ questionId: string | null } | null>(null);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
-  const lastFocusedRef = useRef<string | null>(null);
-  const [focusTick, setFocusTick] = useState<{ id: string; code: string; n: number } | null>(null);
 
   const answeredCount = questions.filter((q) => answers[q.id]?.selectedOptionIds?.length).length;
   const isAnswered = (qi: number) => Boolean(answers[questions[qi].id]?.selectedOptionIds?.length);
@@ -210,15 +217,30 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
     if (dx > 60) goTo(page - 1);
   };
 
-  // Picking an entry in the bank drawer writes its code into the blank last clicked;
-  // the student still confirms it there.
-  const pickFromBank = (i: number) => {
-    const qid = lastFocusedRef.current;
-    const q = questions.find((x) => x.id === qid);
-    if (!q || answers[q.id]?.selectedOptionIds?.length) return;
-    setFocusTick((t) => ({ id: q.id, code: bankCodes[i], n: (t?.n ?? 0) + 1 }));
-    setBankOpen(false);
+  /** A blank was tapped: open the bank beside the paper (phones: below it, with the blank lifted above). */
+  const openForBlank = (questionId: string, el: HTMLElement) => {
+    setPanel({ questionId });
+    requestAnimationFrame(() => {
+      const viewer = viewerRef.current;
+      if (!viewer || window.matchMedia("(min-width: 768px)").matches) return;
+      const top = el.getBoundingClientRect().top - viewer.getBoundingClientRect().top;
+      if (top > viewer.clientHeight * 0.35 || top < 0) viewer.scrollBy({ top: top - 90, behavior: "smooth" });
+    });
   };
+
+  /** An entry tapped in the panel answers the open blank (replacing any earlier answer). */
+  const answerWithCode = (questionId: string, code: string) => {
+    const q = questions.find((x) => x.id === questionId);
+    const option = q?.options.find((o, i) => normalizeCode(codeOf(o, i)) === normalizeCode(code));
+    if (q && option) onAnswerChange(q.id, { selectedOptionIds: [option.id] });
+  };
+  const panelQuestionIndex = panel?.questionId ? questions.findIndex((q) => q.id === panel.questionId) : -1;
+  const panelSelected = (() => {
+    if (panelQuestionIndex < 0) return null;
+    const q = questions[panelQuestionIndex];
+    const i = q.options.findIndex((o) => o.id === answers[q.id]?.selectedOptionIds?.[0]);
+    return i >= 0 ? codeOf(q.options[i], i) : null;
+  })();
 
   // Entries already used in a confirmed answer fade in the bank (each question has its own option rows, so match by text).
   const usedLabels = useMemo(() => {
@@ -243,8 +265,8 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
       questions={questions}
       answers={answers}
       measuring={measuring}
-      focusTick={focusTick}
-      onFocusBlank={(id) => (lastFocusedRef.current = id)}
+      activeBlank={panel?.questionId ?? null}
+      onFocusBlank={openForBlank}
       onAnswerChange={onAnswerChange}
     />
   );
@@ -253,12 +275,13 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
   const hasPrev = page > 0;
 
   return (
-    <div className="relative flex h-full flex-col">
+    // With the bank open, the paper moves left to make room for it.
+    <div className={`relative flex h-full flex-col transition-[margin] duration-200 ${panel ? BANK_PANEL_SHIFT : ""}`}>
       {/* Off-screen copy at print width, used to cut pages. */}
       <div
         ref={measureRef}
         aria-hidden
-        className="pointer-events-none invisible fixed left-[-10000px] top-0 font-paper text-[21px] leading-[1.6] text-black"
+        className={`pointer-events-none invisible fixed left-[-10000px] top-0 font-paper ${PAPER_TEXT} text-black`}
         style={{ width: CONTENT_W }}
       >
         {renderBlocks(blocks, true)}
@@ -268,12 +291,13 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
       <div className="relative min-h-0 flex-1">
         <div
           ref={viewerRef}
-          className="absolute inset-0 overflow-y-auto overflow-x-hidden"
+          // Phones: room to scroll the lower blanks up above the bank sheet.
+          className={`absolute inset-0 overflow-y-auto overflow-x-hidden ${panel ? "max-md:pb-[52vh]" : ""}`}
           onPointerDown={onPointerDown}
           onPointerUp={onPointerUp}
         >
           {pages && viewportW > 0 && totalPages > 0 && (
-            <div className={`flex justify-center ${compact ? "px-2 py-2" : "px-4 py-4"}`}>
+            <div className={`flex justify-center ${compact ? "px-2 py-2" : "px-4 py-3"}`}>
               {/* Keyed by the page, so each turn replays the slide-in. */}
               <div
                 key={`${page}-${turn.n}`}
@@ -340,7 +364,7 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
 
           <button
             type="button"
-            onClick={() => setBankOpen(true)}
+            onClick={() => setPanel((p) => (p ? null : { questionId: null }))}
             className="flex shrink-0 items-center gap-1.5 rounded-xl px-3 py-2.5 text-sm text-on-surface hover:bg-surface-container-highest"
           >
             <span className="material-symbols-outlined text-lg text-primary">menu_book</span>
@@ -360,50 +384,18 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
         </div>
       </div>
 
-      {/* Bank drawer: look up the Option Bank without turning back. */}
-      {bankOpen && (
-        <div className="fixed inset-0 z-50 flex justify-end bg-black/50 backdrop-blur-sm" onClick={() => setBankOpen(false)}>
-          <div
-            className="h-full w-full max-w-md overflow-y-auto bg-[#fdfcf8] font-paper text-black shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="sticky top-0 z-10 flex items-center justify-between border-b border-black/15 bg-[#fdfcf8] px-5 py-4">
-              <div>
-                <div className="text-lg font-bold leading-tight">ส่วนที่ 1: คลังตัวเลือก</div>
-                <div className="text-sm text-black/55">
-                  {lastFocusedRef.current
-                    ? "คลิกตัวเลือกเพื่อเขียนรหัสลงในช่องว่างที่เลือกไว้"
-                    : "คลิกช่องว่างในข้อสอบก่อน แล้วค่อยเลือกตัวเลือก"}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => setBankOpen(false)}
-                className="flex h-9 w-9 items-center justify-center rounded-full text-black/60 hover:bg-black/5 hover:text-black"
-              >
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-            <ul className="p-3">
-              {bank.map((o, i) => (
-                <li key={o.id}>
-                  <button
-                    type="button"
-                    onClick={() => pickFromBank(i)}
-                    className={`flex w-full gap-3 rounded-lg px-3 py-2 text-left text-[17px] leading-snug hover:bg-blue-50 ${
-                      usedLabels.has(o.label) ? "text-black/30 line-through" : ""
-                    }`}
-                  >
-                    <span className="w-[78px] shrink-0 font-bold text-blue-900">[{bankCodes[i]}]</span>
-                    <span>{o.label}</span>
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
+      {panel && (
+        <BankPanel
+          entries={bank.map((o, i) => ({ code: bankCodes[i], label: o.label, used: usedLabels.has(o.label) }))}
+          questionLabel={panelQuestionIndex >= 0 ? `ข้อ ${panelQuestionIndex + 1}` : null}
+          selectedCode={panelSelected}
+          onPick={(code) => {
+            if (!panel.questionId) return;
+            answerWithCode(panel.questionId, code);
+          }}
+          onClose={() => setPanel(null)}
+        />
       )}
-
       {confirmSubmit && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-6 backdrop-blur-sm">
           <div className="w-full max-w-sm space-y-5 rounded-3xl border border-outline-variant/40 bg-surface-container p-7 text-center shadow-2xl">
@@ -494,7 +486,7 @@ function Sheet({
         <span className="truncate">{title}</span>
         <span className="shrink-0">หน้าที่ {pageNumber}</span>
       </div>
-      <div className="relative text-[21px] leading-[1.6]">{children}</div>
+      <div className={`relative ${PAPER_TEXT}`}>{children}</div>
       <div className="absolute inset-x-0 bottom-4 text-center text-[13px] text-black/40">
         — {pageNumber} / {totalPages} —
       </div>
@@ -513,15 +505,16 @@ interface BlockFlowProps {
   answers: AnswerMap;
   /** Measuring copy: every block tagged so its height can be read back. */
   measuring: boolean;
-  focusTick: { id: string; code: string; n: number } | null;
-  onFocusBlank: (questionId: string) => void;
+  /** The blank the bank panel is open for. */
+  activeBlank: string | null;
+  onFocusBlank: (questionId: string, el: HTMLElement) => void;
   onAnswerChange: (questionId: string, value: AnswerMap[string]) => void;
 }
 
 const BANK_GRID = "grid grid-cols-[13%_20.33%_13%_20.33%_13%_20.34%]";
 
 /** Renders a run of blocks; consecutive bank rows share one table with a header row. */
-function BlockFlow({ blocks, paper, bank, bankCodes, usedLabels, questions, answers, measuring, focusTick, onFocusBlank, onAnswerChange }: BlockFlowProps) {
+function BlockFlow({ blocks, paper, bank, bankCodes, usedLabels, questions, answers, measuring, activeBlank, onFocusBlank, onAnswerChange }: BlockFlowProps) {
   const out: React.ReactNode[] = [];
   const tag = (key: string) => (measuring ? { "data-block": key } : {});
   const longestLabel = bank.reduce((l, o) => (o.label.length > l.length ? o.label : l), "");
@@ -536,7 +529,7 @@ function BlockFlow({ blocks, paper, bank, bankCodes, usedLabels, questions, answ
       }
       i--;
       out.push(
-        <div key={`t${rows[0]}`} className="border-l border-t border-black text-[17px] leading-snug">
+        <div key={`t${rows[0]}`} className="border-l border-t border-black text-[15.5px] leading-snug">
           <div {...tag("thead")} className={BANK_GRID}>
             {[0, 1, 2].map((c) => (
               <PairHeader key={c} />
@@ -587,10 +580,10 @@ function BlockFlow({ blocks, paper, bank, bankCodes, usedLabels, questions, answ
             number={b.index + 1}
             question={q}
             selectedOptionId={answers[q.id]?.selectedOptionIds?.[0]}
-            externalPick={focusTick?.id === q.id ? focusTick : null}
+            active={activeBlank === q.id}
             readOnly={measuring}
             reserveLabel={measuring ? longestLabel : undefined}
-            onFocus={() => onFocusBlank(q.id)}
+            onFocus={(el) => onFocusBlank(q.id, el)}
             onChange={(ids) => onAnswerChange(q.id, { selectedOptionIds: ids })}
           />
         </div>
@@ -615,7 +608,7 @@ function PairCells({ code, label, used }: { code: string; label: string; used: b
   const fade = used ? " text-black/30 line-through decoration-black/30" : "";
   return (
     <>
-      <div className={`${cell} text-center text-[16px] font-bold${fade}`}>[{code}]</div>
+      <div className={`${cell} text-center text-[14.5px] font-bold${fade}`}>[{code}]</div>
       <div className={`${cell}${fade}`}>{label}</div>
     </>
   );
@@ -646,21 +639,22 @@ interface PaperQuestionProps {
   number: number;
   question: ExamQuestion;
   selectedOptionId: string | undefined;
-  /** Code picked from the bank drawer for this blank. */
-  externalPick: { code: string; n: number } | null;
+  /** The bank panel is open for this blank. */
+  active: boolean;
   readOnly?: boolean;
   /** Measuring copy only: room for the longest entry, so an answer written in later never overflows the page. */
   reserveLabel?: string;
-  onFocus: () => void;
+  onFocus: (el: HTMLElement) => void;
   onChange: (selectedOptionIds: string[]) => void;
 }
 
 /**
- * "ข้อ N. ... ......[ W ]......" — the student writes a bank code on the dotted
- * line, sees the entry's words, and confirms (button or Enter). A confirmed
- * blank is final: it fades and locks, and the server refuses to change it.
+ * "ข้อ N. ... ......[ W ]......" — tapping the blank pops up the Option Bank
+ * to pick from; the code can also be typed (saved on Enter or on leaving the
+ * blank). The blank shows the code and the entry's words, and can be
+ * changed again at any time until the paper is handed in.
  */
-function PaperQuestion({ number, question, selectedOptionId, externalPick, readOnly, reserveLabel, onFocus, onChange }: PaperQuestionProps) {
+function PaperQuestion({ number, question, selectedOptionId, active, readOnly, reserveLabel, onFocus, onChange }: PaperQuestionProps) {
   const options = question.options;
   const codes = options.map(codeOf);
   // Chapter 5 style codes ("Code 07"): "Code" is printed, the student writes "07".
@@ -668,69 +662,64 @@ function PaperQuestion({ number, question, selectedOptionId, externalPick, readO
   const shown = (c: string) => (codePrefix ? c.slice(codePrefix.length).trim() : c);
 
   const savedIndex = options.findIndex((o) => o.id === selectedOptionId);
-  const locked = savedIndex >= 0;
-  const [text, setText] = useState(locked ? shown(codes[savedIndex]) : "");
-
+  const [text, setText] = useState(savedIndex >= 0 ? shown(codes[savedIndex]) : "");
+  // An answer picked in the bank panel (or restored) shows in the blank.
   useEffect(() => {
-    if (externalPick && !locked) setText(shown(externalPick.code));
+    setText(savedIndex >= 0 ? shown(codes[savedIndex]) : "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [externalPick?.n]);
+  }, [savedIndex]);
 
   const findIndex = (value: string) => {
     const key = normalizeCode(value);
     return key ? codes.findIndex((c) => normalizeCode(c) === key) : -1;
   };
-  const matched = locked ? savedIndex : findIndex(text);
+  const matched = findIndex(text);
   const valid = text.trim() === "" || matched >= 0;
   const chosen = matched >= 0 ? options[matched] : null;
+  const answered = savedIndex >= 0;
 
-  const confirm = () => {
-    if (!locked && chosen) onChange([chosen.id]);
+  const save = () => {
+    if (chosen && matched !== savedIndex) onChange([chosen.id]);
   };
 
   const [before, ...rest] = question.prompt.split(BLANK);
   const after = rest.join(BLANK);
 
   return (
-    <div className={`font-bold transition-opacity ${locked ? "opacity-40" : ""}`}>
-      ข้อ {number}. {before}
+    <div className="font-medium">
+      <b>ข้อ {number}.</b> {before}
       {/* The blank holds the code and, once it matches, the entry's words: "A05 NCP". */}
-      <span className="mx-1 border-b-2 border-dotted border-black px-2">
+      <span className={`mx-1 rounded-sm border-b-2 border-dotted px-2 ${active ? "border-blue-700 bg-blue-100/70" : "border-black"}`}>
         <span className="whitespace-nowrap">
-        {codePrefix && <span className="text-black/45">{codePrefix}</span>}
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, "").slice(0, 6))}
-          onKeyDown={(e) => e.key === "Enter" && confirm()}
-          onFocus={onFocus}
-          readOnly={readOnly || locked}
-          tabIndex={readOnly || locked ? -1 : undefined}
-          autoComplete="off"
-          spellCheck={false}
-          aria-label={`คำตอบข้อ ${number}`}
-          placeholder="____"
-          className={`ml-1 w-[3em] rounded bg-transparent text-center font-bold uppercase outline-none placeholder:text-black/25 focus:bg-blue-100/70 ${
-            valid ? "text-blue-800" : "text-red-600"
-          }`}
-        />
-        {locked && <span className="material-symbols-outlined align-middle text-[18px] text-emerald-700">lock</span>}
+          {codePrefix && <span className="text-black/45">{codePrefix}</span>}
+          <input
+            value={text}
+            onChange={(e) => setText(e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, "").slice(0, 6))}
+            onKeyDown={(e) => e.key === "Enter" && (save(), e.currentTarget.blur())}
+            onFocus={(e) => onFocus(e.currentTarget)}
+            onClick={(e) => onFocus(e.currentTarget)}
+            onBlur={save}
+            readOnly={readOnly}
+            tabIndex={readOnly ? -1 : undefined}
+            autoComplete="off"
+            spellCheck={false}
+            // Tablets: no on-screen keyboard over the bank panel (a real keyboard still types codes).
+            inputMode="none"
+            aria-label={`คำตอบข้อ ${number}`}
+            placeholder="____"
+            className={`ml-1 w-[3em] cursor-pointer rounded bg-transparent text-center font-bold uppercase outline-none placeholder:text-black/25 ${
+              valid ? "text-blue-800" : "text-red-600"
+            }`}
+          />
         </span>
         {(chosen || reserveLabel) && <span className="ml-1 text-blue-800">{chosen ? chosen.label : reserveLabel}</span>}
       </span>
       {after}
-      <div className="flex h-[1.6em] items-center gap-2 pl-10 text-[17px] font-normal leading-[1.45]">
+      <div className="flex h-[1.6em] items-center gap-2 pl-10 text-[15px] font-normal leading-[1.45]">
         {!valid ? (
           <span className="text-red-600">ไม่มีรหัสนี้ในคลังตัวเลือก</span>
-        ) : locked ? (
-          <span className="text-[15px] text-emerald-700">✓ ตอบแล้ว (แก้ไขไม่ได้)</span>
-        ) : chosen ? (
-          <button
-            type="button"
-            onClick={confirm}
-            className="rounded-md bg-blue-700 px-2.5 py-0.5 text-[15px] font-bold text-white hover:bg-blue-800"
-          >
-            ยืนยันคำตอบ
-          </button>
+        ) : answered && matched === savedIndex ? (
+          <span className="text-emerald-700">✓ ตอบแล้ว (แตะช่องเพื่อเปลี่ยนคำตอบ)</span>
         ) : null}
       </div>
     </div>

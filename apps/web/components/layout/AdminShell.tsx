@@ -7,7 +7,8 @@ import { getStoredFullName, logout } from "@/lib/auth";
 const NAV_ITEMS = [
   { href: "/backoffice/monitor", label: "คุมสอบ", icon: "live_tv" },
   { href: "/backoffice/students", label: "รายชื่อ & รหัสเข้าสอบ", icon: "badge" },
-  { href: "/backoffice/courses/new", label: "สร้างรายวิชา", icon: "add_business" },
+  { href: "/backoffice/courses", label: "รายวิชา & การแสดงผล", icon: "visibility" },
+  { href: "/backoffice/exams/import", label: "นำเข้าข้อสอบ (Word/PDF)", icon: "upload" },
   { href: "/backoffice/exams/new", label: "สร้างข้อสอบ", icon: "post_add" },
   { href: "/backoffice/materials/upload", label: "อัพโหลดเอกสาร", icon: "upload_file" },
 ];

@@ -2,6 +2,7 @@ import type { ViolationType } from "../constants";
 import { prisma } from "../prisma";
 import { byThaiName } from "../utils/roster";
 import { generateRandomSeed, seededShuffle } from "../utils/shuffle";
+import { dealBlocks, fixedOptionIds, readPaper, slotOrder } from "./paperDocument";
 
 export class ExamRuleError extends Error {}
 
@@ -77,6 +78,7 @@ async function loadOrderedQuestionIds(examId: string, attempt: AttemptRow, shuff
 type DealtExam = {
   shuffleQuestions: boolean;
   shuffleOptions: boolean;
+  paperJson: string | null;
   questions: Array<{
     id: string;
     type: string;
@@ -96,7 +98,16 @@ type DealtExam = {
  * callers sending this to a student must strip it.
  */
 function dealPaper(exam: DealtExam, seed: string) {
-  const questionOrder = exam.shuffleQuestions ? seededShuffle(exam.questions, seed) : exam.questions;
+  // Imported documents: parts shuffled block by block, in the document's layout.
+  const blocks = readPaper(exam.paperJson);
+  const document = blocks && dealBlocks(blocks, seed, exam.shuffleQuestions);
+  const fixedOptions = blocks ? fixedOptionIds(blocks) : new Set<string>();
+  const byId = new Map(exam.questions.map((q) => [q.id, q]));
+  const questionOrder = document
+    ? slotOrder(document).flatMap((id) => byId.get(id) ?? [])
+    : exam.shuffleQuestions
+      ? seededShuffle(exam.questions, seed)
+      : exam.questions;
 
   const bankRank = new Map<number, number>();
   if (exam.shuffleOptions) {
@@ -104,13 +115,13 @@ function dealPaper(exam: DealtExam, seed: string) {
     seededShuffle(bankOrders.sort((a, b) => a - b), `${seed}:bank`).forEach((order, i) => bankRank.set(order, i));
   }
 
-  return questionOrder.map((q) => {
+  const questions = questionOrder.map((q) => {
     const optionOrder =
       q.type === "FILL_IN_BANK"
         ? exam.shuffleOptions
           ? [...q.options].sort((a, b) => (bankRank.get(a.order) ?? 0) - (bankRank.get(b.order) ?? 0))
           : q.options
-        : exam.shuffleOptions
+        : exam.shuffleOptions && !fixedOptions.has(q.id)
           ? seededShuffle(q.options, `${seed}:${q.id}`)
           : q.options;
     // The paper's codes in paper order; position i of this student's table gets code i.
@@ -128,6 +139,7 @@ function dealPaper(exam: DealtExam, seed: string) {
       })),
     };
   });
+  return { questions, document };
 }
 
 /**
@@ -152,16 +164,30 @@ export async function getAttemptAnswerSheet(attemptId: string) {
   });
   if (!attempt) throw new ExamRuleError("Attempt not found");
 
-  const rows = dealPaper(attempt.exam, attempt.randomSeed).map((q, i) => {
+  const rows = dealPaper(attempt.exam, attempt.randomSeed).questions.map((q, i) => {
     const answer = attempt.answers.find((a) => a.questionId === q.id);
+    const source = attempt.exam.questions.find((x) => x.id === q.id);
+    const base = {
+      number: i + 1,
+      // Number of the question on the teacher's paper.
+      paperNumber: source?.order ?? null,
+      prompt: q.prompt,
+    };
+    // Written answers: the words themselves (essays have no key; they are marked by the teacher).
+    if (q.type === "SHORT_ANSWER" || q.type === "ESSAY") {
+      const text = answer?.textAnswer?.trim();
+      return {
+        ...base,
+        chosen: text ? { code: null, label: text } : null,
+        correct: source?.answerKey ? { code: null, label: source.answerKey } : null,
+        isCorrect: text && q.type === "SHORT_ANSWER" ? matchesKey(text, source?.answerKey) : null,
+      };
+    }
     const chosenId = answer ? (JSON.parse(answer.selectedOptionIds) as string[])[0] : undefined;
     const chosen = q.options.find((o) => o.id === chosenId) ?? null;
     const correct = q.options.find((o) => o.isCorrect) ?? null;
     return {
-      number: i + 1,
-      // Number of the question on the teacher's paper.
-      paperNumber: attempt.exam.questions.find((x) => x.id === q.id)?.order ?? null,
-      prompt: q.prompt,
+      ...base,
       chosen: chosen && { code: chosen.code, label: chosen.label },
       correct: correct && { code: correct.code, label: correct.label },
       isCorrect: chosen ? chosen.isCorrect : null,
@@ -195,6 +221,8 @@ export async function startOrResumeAttempt(examId: string, studentId: string) {
     },
   });
   if (!exam) throw new ExamRuleError("Exam not found");
+  const course = await prisma.course.findUnique({ where: { id: exam.courseId }, select: { isHidden: true } });
+  if (course?.isHidden) throw new ExamRuleError("รายวิชานี้ถูกปิดการแสดงผลอยู่ กรุณาติดต่ออาจารย์ผู้คุมสอบ");
   // Only students on the course's class list sit its exams (no self-registered walk-ins).
   const enrolled = await prisma.enrollment.count({ where: { courseId: exam.courseId, studentId, status: "ACTIVE" } });
   if (!enrolled) throw new ExamRuleError("คุณไม่มีรายชื่อในรายวิชานี้ กรุณาติดต่ออาจารย์ผู้คุมสอบ");
@@ -229,7 +257,8 @@ export async function startOrResumeAttempt(examId: string, studentId: string) {
     }
   }
 
-  const paper = dealPaper(exam, attempt.randomSeed).map((q) => ({
+  const dealt = dealPaper(exam, attempt.randomSeed);
+  const paper = dealt.questions.map((q) => ({
     ...q,
     options: q.options.map(({ id, label, code }) => ({ id, label, code })), // isCorrect stripped
   }));
@@ -281,6 +310,8 @@ export async function startOrResumeAttempt(examId: string, studentId: string) {
       maxViolations: exam.maxViolations,
     },
     questions: paper,
+    /** Imported documents: the paper's layout as this student's blocks (null otherwise). */
+    document: dealt.document,
   };
 }
 
@@ -307,16 +338,9 @@ export async function saveAnswer(
     if (current.status !== "IN_PROGRESS") throw new ExamRuleError("หมดเวลาทำข้อสอบแล้ว ระบบส่งคำตอบให้อัตโนมัติ");
     const question = await prisma.question.findFirst({ where: { id: questionId, examId: exam.id }, select: { type: true } });
     if (!question) throw new ExamRuleError("Question not found");
-    // A blank on the paper is final once written: the student confirms it, then it locks.
-    if (question.type === "FILL_IN_BANK") {
-      const existing = await prisma.examAnswer.findUnique({
-        where: { attemptId_questionId: { attemptId: attempt.id, questionId } },
-        select: { selectedOptionIds: true },
-      });
-      if (existing && (JSON.parse(existing.selectedOptionIds) as string[]).length > 0) {
-        throw new ExamRuleError("ข้อนี้ตอบไปแล้ว แก้ไขไม่ได้");
-      }
-      if (!payload.selectedOptionIds?.length) throw new ExamRuleError("ยังไม่ได้เลือกคำตอบ");
+    // A blank may be changed until the paper is handed in, but not emptied.
+    if (question.type === "FILL_IN_BANK" && !payload.selectedOptionIds?.length) {
+      throw new ExamRuleError("ยังไม่ได้เลือกคำตอบ");
     }
   }
 
@@ -413,16 +437,15 @@ export async function gradeAndSubmit(
   const marks = new Map<string, { isCorrect: boolean; pointsAwarded: number; ids: string[] }>();
 
   for (const question of attempt.exam.questions) {
+    // Essays are read and marked by the teacher; the automatic score leaves them out.
+    if (question.type === "ESSAY") continue;
     total += question.points;
     const answer = attempt.answers.find((a) => a.questionId === question.id);
     if (!answer) continue;
 
     let correct = false;
     if (question.type === "SHORT_ANSWER") {
-      correct =
-        !!answer.textAnswer &&
-        !!question.answerKey &&
-        normalize(answer.textAnswer) === normalize(question.answerKey);
+      correct = !!answer.textAnswer && matchesKey(answer.textAnswer, question.answerKey);
     } else {
       const correctIds = question.options.filter((o) => o.isCorrect).map((o) => o.id).sort();
       const selected = (JSON.parse(answer.selectedOptionIds) as string[]).sort();
@@ -458,8 +481,16 @@ export async function gradeAndSubmit(
   });
 }
 
+/** Case, spacing and a trailing full stop don't matter. */
 function normalize(value: string): string {
-  return value.trim().toLowerCase();
+  return value.normalize("NFC").toLowerCase().replace(/\s+/g, "").replace(/[.。]$/, "");
+}
+
+/** A written answer against its key; the key may list several accepted answers as "a | b". */
+function matchesKey(answer: string, key: string | null | undefined): boolean {
+  if (!key) return false;
+  const given = normalize(answer);
+  return key.split("|").some((k) => normalize(k) !== "" && normalize(k) === given);
 }
 
 async function requireOwnedInProgressAttempt(attemptId: string, studentId: string) {
@@ -563,7 +594,8 @@ export async function getLiveState(attemptId: string, studentId: string) {
 export async function getMyLatestResult(examId: string, studentId: string) {
   const exam = await prisma.exam.findUnique({
     where: { id: examId },
-    select: { title: true, maxAttempts: true, status: true, _count: { select: { questions: true } } },
+    // Essays are marked by the teacher, so the automatic score is out of the other questions.
+    select: { title: true, maxAttempts: true, status: true, _count: { select: { questions: { where: { type: { not: "ESSAY" } } } } } },
   });
   if (!exam) throw new ExamRuleError("Exam not found");
   const [latest, attemptCount] = await Promise.all([

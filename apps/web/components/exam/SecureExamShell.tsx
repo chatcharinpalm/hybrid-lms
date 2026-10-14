@@ -131,7 +131,7 @@ export function SecureExamShell({
       {
         icon: "gpp_bad",
         tone: "text-error bg-error/15",
-        text: `ทำผิดครบ ${security.maxViolations} ครั้ง ระบบจะส่งข้อสอบทันที`,
+        text: "ทำผิดกฎ ระบบจะส่งข้อสอบทันที",
       },
     ];
     return (

@@ -119,3 +119,24 @@ body.exam-lockdown img {
 /* Ends on transform: none, so the text is never left on a scaled bitmap layer. */
 .page-in-next { animation: page-in-next 260ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 .page-in-prev { animation: page-in-prev 260ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+
+/* Option Bank sheet (components/exam/BankPanel.tsx): slides in from the right, or up on phones. */
+@keyframes bank-in-side { from { transform: translateX(100%); } to { transform: none; } }
+@keyframes bank-in-up { from { transform: translateY(100%); } to { transform: none; } }
+.bank-panel-in { animation: bank-in-up 220ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+@media (min-width: 768px) {
+  .bank-panel-in { animation-name: bank-in-side; }
+}
+
+/* ── Imported document papers (components/exam/DocumentPaper.tsx) ── */
+.doc-html p { margin: 0 0 0.3em; line-height: 1.75; }
+.doc-html p.doc-empty { margin: 0; line-height: 1; }
+.doc-html h2 { font-size: 1.25em; font-weight: 700; margin: 0.4em 0; }
+.doc-html h3 { font-size: 1.1em; font-weight: 700; margin: 0.35em 0; }
+.doc-html h4 { font-weight: 700; margin: 0.3em 0; }
+.doc-html img { display: inline-block; max-width: 100%; height: auto; vertical-align: middle; }
+.doc-html table.doc-table { border-collapse: collapse; margin: 0.5em 0; max-width: 100%; }
+.doc-html table.doc-table td { border: 1px solid #555; padding: 3px 8px; vertical-align: top; }
+.doc-html table.doc-table td.doc-merged { border-top-color: transparent; }
+.doc-html table.doc-table td p { margin: 0; }
+.doc-html [data-slot] { display: inline-block; vertical-align: baseline; }

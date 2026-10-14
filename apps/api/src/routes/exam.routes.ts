@@ -1,14 +1,16 @@
-import { Router } from "express";
+﻿import { Router } from "express";
 import * as examController from "../controllers/exam.controller";
-import { requireAuth, requireRole } from "../middleware/auth";
+import { optionalAuth, requireAuth, requireRole } from "../middleware/auth";
 
 export const examRouter = Router();
 
 // Teacher/Admin: authoring
 examRouter.post("/", requireAuth, requireRole("TEACHER", "ADMIN"), examController.createExam);
+// An exam from the teacher's own document (Word/PDF), layout kept.
+examRouter.post("/import-document", requireAuth, requireRole("TEACHER", "ADMIN"), examController.importDocumentExam);
 // Public browsing: the exam center list (title/schedule/status) is viewable
-// without login — only starting an attempt below requires a student login.
-examRouter.get("/course/:courseId", examController.listExamsForCourse);
+// without login â€” only starting an attempt below requires a student login.
+examRouter.get("/course/:courseId", optionalAuth, examController.listExamsForCourse);
 examRouter.post(
   "/:examId/publish",
   requireAuth,

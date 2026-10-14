@@ -67,6 +67,8 @@ model Course {
   title       String
   description String? @db.Text
   termLabel   String? // e.g. 2/2567
+  // Hidden from students (course list, exam center, starting its exams); staff still see it.
+  isHidden    Boolean  @default(false)
   teacherId   String
   teacher     User     @relation("CourseTeacher", fields: [teacherId], references: [id])
   createdAt   DateTime @default(now())
@@ -166,6 +168,10 @@ model Exam {
   // Per-question time limit, enforced server-side. Null = no per-question limit.
   // When set, students move strictly forward (no going back to earlier questions).
   timePerQuestionSeconds Int?
+  // Exams imported from a teacher's document (Word/PDF): the document's own layout as JSON
+  // blocks (headings, instructions, tables, images, and question blocks that reference
+  // Question ids). Null for exams authored in the back office or seeded.
+  paperJson String? @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -180,7 +186,7 @@ model Exam {
 model Question {
   id     String @id @default(uuid())
   examId String
-  type   String @default("SINGLE_CHOICE") // QuestionType: SINGLE_CHOICE | MULTIPLE_CHOICE | SHORT_ANSWER | FILL_IN_BANK (pick one answer-bank entry to fill the blank)
+  type   String @default("SINGLE_CHOICE") // QuestionType: SINGLE_CHOICE | MULTIPLE_CHOICE | SHORT_ANSWER | FILL_IN_BANK (pick one answer-bank entry to fill the blank) | ESSAY (written answer, not auto-graded)
   prompt String @db.Text
   points Int    @default(1)
   order  Int    @default(0) // authoring order (randomized at attempt time)
@@ -284,6 +290,14 @@ model ExamViolationLog {
   attempt ExamAttempt @relation(fields: [attemptId], references: [id], onDelete: Cascade)
 
   @@index([attemptId, type])
+}
+
+// Site-wide switches set from the back office, e.g. key "hiddenMenus" =
+// JSON string[] of student-portal menus to hide ("courses", "attendance").
+model SiteSetting {
+  key       String   @id
+  value     String   @db.Text // JSON-encoded
+  updatedAt DateTime @updatedAt
 }
 
 // Generic audit trail for admin/security review

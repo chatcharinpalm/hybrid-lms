@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { Request, Response } from "express";
 import { z } from "zod";
 import { VIOLATION_TYPES } from "../constants";
@@ -5,6 +6,7 @@ import { prisma } from "../prisma";
 import * as examSession from "../services/examSession.service";
 import { ExamRuleError } from "../services/examSession.service";
 import * as proctorControl from "../services/proctorControl.service";
+import { sanitizePaperHtml, type PaperBlock } from "../services/paperDocument";
 
 const createExamSchema = z.object({
   courseId: z.string().uuid(),
@@ -74,9 +76,158 @@ export async function createExam(req: Request, res: Response) {
   return res.status(201).json(exam);
 }
 
+const importOptionSchema = z.object({
+  label: z.string().trim().min(1).max(1000),
+  /** Option Bank code as printed ("A01", "W"); absent on choice questions. */
+  code: z.string().trim().min(1).max(16).optional(),
+  isCorrect: z.boolean(),
+});
+
+const importQuestionSchema = z.object({
+  /** The client's id for the question; question blocks name it in their slots. */
+  key: z.string().min(1).max(40),
+  type: z.enum(["SINGLE_CHOICE", "SHORT_ANSWER", "FILL_IN_BANK", "ESSAY"]),
+  /** Plain text of the question, for the monitor, answer sheets and Excel. */
+  prompt: z.string().trim().min(1).max(5000),
+  points: z.number().int().min(0).max(100),
+  /** SHORT_ANSWER: accepted answers, "a | b". */
+  answerKey: z.string().trim().max(1000).optional(),
+  options: z.array(importOptionSchema).max(200).default([]),
+});
+
+const importBlockSchema = z.discriminatedUnion("t", [
+  z.object({ t: z.literal("html"), html: z.string().max(3_000_000) }),
+  z.object({ t: z.literal("bank") }),
+  z.object({
+    t: z.literal("q"),
+    num: z.string().max(20),
+    html: z.string().max(3_000_000),
+    slots: z.array(z.string()).min(1),
+    run: z.number().int().min(0),
+    fixedOptions: z.boolean().optional(),
+    marker: z.enum(["thai", "lower", "upper", "num"]).optional(),
+  }),
+]);
+
+const importDocumentSchema = z
+  .object({
+    courseId: z.string().uuid(),
+    title: z.string().trim().min(1).max(300),
+    durationMinutes: z.number().int().positive().max(600),
+    blocks: z.array(importBlockSchema).min(1).max(2000),
+    questions: z.array(importQuestionSchema).min(1).max(500),
+  })
+  .superRefine((data, ctx) => {
+    const issue = (message: string) => ctx.addIssue({ code: "custom", message });
+    const keys = new Map(data.questions.map((q, i) => [q.key, i]));
+    const slotted = new Set<string>();
+    for (const b of data.blocks) {
+      if (b.t !== "q") continue;
+      for (const s of b.slots) {
+        if (!keys.has(s)) issue(`ข้อ ${b.num}: ไม่พบคำถาม ${s}`);
+        if (slotted.has(s)) issue(`ข้อ ${b.num}: คำถามซ้ำ`);
+        slotted.add(s);
+      }
+    }
+    data.questions.forEach((q, i) => {
+      const label = `คำถามที่ ${i + 1}`;
+      if (!slotted.has(q.key)) issue(`${label}: ไม่อยู่ในเอกสาร`);
+      const correct = q.options.filter((o) => o.isCorrect).length;
+      if (q.type === "SINGLE_CHOICE" && (q.options.length < 2 || correct !== 1)) {
+        issue(`${label}: ต้องมีตัวเลือกอย่างน้อย 2 ข้อ และเฉลยถูก 1 ข้อ`);
+      }
+      if (q.type === "FILL_IN_BANK" && (q.options.some((o) => !o.code) || correct !== 1)) {
+        issue(`${label}: ต้องมีคลังตัวเลือกพร้อมรหัส และเฉลย 1 รหัส`);
+      }
+      if (q.type === "SHORT_ANSWER" && !q.answerKey) issue(`${label}: ยังไม่มีเฉลย`);
+    });
+  });
+
+/**
+ * Back office: an exam from the teacher's own document (Word or PDF, read in
+ * the browser and checked by the teacher). The document's layout is kept as
+ * blocks (services/paperDocument.ts); its questions become ordinary Questions,
+ * so grading, the monitor and the Excel export work as for any exam. The
+ * room starts closed until a proctor opens it.
+ */
+export async function importDocumentExam(req: Request, res: Response) {
+  const parsed = importDocumentSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: [...new Set(parsed.error.issues.map((i) => i.message))].slice(0, 10).join("\n") });
+  }
+  const data = parsed.data;
+  const course = await prisma.course.findUnique({ where: { id: data.courseId }, select: { id: true } });
+  if (!course) return res.status(404).json({ error: "ไม่พบรายวิชา" });
+
+  // Ids made here so the whole exam goes in as three bulk inserts (one per
+  // table) — a row-by-row nested create takes hundreds of round trips.
+  const examId = randomUUID();
+  const ids = new Map(data.questions.map((q) => [q.key, randomUUID()]));
+  const questions = data.questions.map((q, i) => ({ ...q, id: ids.get(q.key)!, order: i + 1 }));
+  const blocks: PaperBlock[] = data.blocks.map((b) => {
+    if (b.t === "bank") return b;
+    // Slot markers in the html name the client's keys; they become Question ids.
+    const html = sanitizePaperHtml(b.html).replace(/data-slot="([^"]+)"/g, (_m, key: string) => `data-slot="${ids.get(key) ?? ""}"`);
+    return b.t === "html" ? { t: "html", html } : { ...b, html, slots: b.slots.map((s) => ids.get(s)!) };
+  });
+
+  const [exam] = await prisma.$transaction([
+    prisma.exam.create({
+      data: {
+        id: examId,
+        courseId: course.id,
+        title: data.title,
+        description: `จำนวน ${questions.length} ข้อ`,
+        durationMinutes: data.durationMinutes,
+        timePerQuestionSeconds: null,
+        maxAttempts: 0,
+        status: "CLOSED",
+        passScorePercent: 60,
+        requireFullscreen: true,
+        blockClipboard: true,
+        blockContextMenu: true,
+        maxViolations: 3,
+        shuffleQuestions: true,
+        shuffleOptions: true,
+        paperJson: JSON.stringify(blocks),
+      },
+      select: { id: true, title: true },
+    }),
+    prisma.question.createMany({
+      data: questions.map((q) => ({
+        id: q.id,
+        examId,
+        type: q.type,
+        prompt: q.prompt,
+        points: q.points,
+        order: q.order,
+        answerKey: q.type === "SHORT_ANSWER" ? q.answerKey : null,
+      })),
+    }),
+    prisma.questionOption.createMany({
+      data: questions.flatMap((q) =>
+        q.options.map((o, idx) => ({ questionId: q.id, label: o.label, code: o.code ?? null, isCorrect: o.isCorrect, order: idx }))
+      ),
+    }),
+  ]);
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: req.user!.id,
+      action: "EXAM_IMPORTED",
+      entity: "Exam",
+      entityId: exam.id,
+      metadata: JSON.stringify({ questions: questions.length, blocks: blocks.length }),
+    },
+  });
+  return res.status(201).json(exam);
+}
+
 export async function listExamsForCourse(req: Request, res: Response) {
+  const staff = req.user?.role === "TEACHER" || req.user?.role === "ADMIN";
   const exams = await prisma.exam.findMany({
-    where: { courseId: req.params.courseId },
+    // A hidden course's exams are listed for staff only.
+    where: { courseId: req.params.courseId, ...(staff ? {} : { course: { isHidden: false } }) },
     orderBy: { createdAt: "desc" },
   });
   return res.json(exams);
@@ -103,7 +254,7 @@ export async function startAttempt(req: Request, res: Response) {
 const answerSchema = z.object({
   questionId: z.string().uuid(),
   selectedOptionIds: z.array(z.string().uuid()).optional(),
-  textAnswer: z.string().optional(),
+  textAnswer: z.string().max(10000).optional(),
 });
 
 export async function saveAnswer(req: Request, res: Response) {

@@ -1,4 +1,17 @@
-export type QuestionType = "SINGLE_CHOICE" | "MULTIPLE_CHOICE" | "SHORT_ANSWER" | "FILL_IN_BANK";
+export type QuestionType = "SINGLE_CHOICE" | "MULTIPLE_CHOICE" | "SHORT_ANSWER" | "FILL_IN_BANK" | "ESSAY";
+
+/** How a choice question's choices are lettered: ก. ข. / a. b. / A. B. / (1) (2). */
+export type ChoiceMarker = "thai" | "lower" | "upper" | "num";
+
+/**
+ * An imported document's layout (apps/api/src/services/paperDocument.ts):
+ * plain document HTML, the Option Bank, or one numbered question whose html
+ * has <span data-slot="QUESTION_ID"> where the student writes.
+ */
+export type PaperBlock =
+  | { t: "html"; html: string }
+  | { t: "bank" }
+  | { t: "q"; num: string; html: string; slots: string[]; run: number; fixedOptions?: boolean; marker?: ChoiceMarker };
 
 export interface ExamOption {
   id: string;
@@ -46,6 +59,8 @@ export interface ExamPaper {
   questionSecondsLeft?: number | null;
   security: ExamSecurityConfig;
   questions: ExamQuestion[];
+  /** Imported documents: this student's paper in the document's layout. */
+  document?: PaperBlock[] | null;
 }
 
 export type ViolationType =

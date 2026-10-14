@@ -40,11 +40,14 @@ const config: Config = {
         "on-error-container": "#ffdad6",
       },
       fontFamily: {
-        sans: ["Inter", "sans-serif"],
-        mono: ["JetBrains Mono", "monospace"],
-        // The exam paper's TH SarabunPSK, as its web counterpart Sarabun. Not the locally installed
-        // TH SarabunPSK: browsers place its Thai vowels and tone marks wrongly.
-        paper: ["Sarabun", "serif"],
+        // Inter has no Thai letters; Thai text falls through to IBM Plex Sans Thai
+        // instead of the system's dated Thai font.
+        sans: ["Inter", "IBM Plex Sans Thai", "sans-serif"],
+        mono: ["JetBrains Mono", "IBM Plex Sans Thai", "monospace"],
+        // The exam paper: a modern looped Thai face (the Word file's TH SarabunPSK read as
+        // old-fashioned). Not a locally installed font: browsers place some fonts' Thai
+        // vowels and tone marks wrongly.
+        paper: ["IBM Plex Sans Thai Looped", "IBM Plex Sans Thai", "sans-serif"],
       },
     },
   },

@@ -4,10 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getStoredFullName, isLoggedIn, loginUrl, logout } from "@/lib/auth";
+import type { PortalMenu } from "@/lib/portalSettings";
 
-const NAV_ITEMS = [
-  { href: "/courses", label: "คอร์สเรียน", icon: "cast_for_education" },
-  { href: "/attendance", label: "เช็คชื่อเข้าเรียน", icon: "co_present" },
+const NAV_ITEMS: Array<{ href: string; label: string; icon: string; menu?: PortalMenu }> = [
+  { href: "/courses", label: "คอร์สเรียน", icon: "cast_for_education", menu: "courses" },
+  { href: "/attendance", label: "เช็คชื่อเข้าเรียน", icon: "co_present", menu: "attendance" },
   { href: "/exams", label: "ศูนย์สอบ", icon: "assignment_turned_in" },
 ];
 
@@ -16,8 +17,9 @@ const NAV_ITEMS = [
 // left sidebar. The admin back office (components/layout/AdminShell.tsx)
 // intentionally keeps the sidebar look instead, so the two apps read as
 // visually distinct as well as structurally separate.
-export function TopNav() {
+export function TopNav({ hiddenMenus }: { hiddenMenus: PortalMenu[] }) {
   const pathname = usePathname();
+  const navItems = NAV_ITEMS.filter((item) => !item.menu || !hiddenMenus.includes(item.menu));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [loggedIn, setLoggedIn] = useState(false);
   const [fullName, setFullName] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export function TopNav() {
         </Link>
 
         <nav className="hidden md:flex items-center gap-1">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const active = pathname.startsWith(item.href);
             return (
               <Link
@@ -104,7 +106,7 @@ export function TopNav() {
 
       {mobileOpen && (
         <nav className="md:hidden border-t border-outline-variant/30 px-4 py-2 space-y-1 bg-surface-container-low">
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const active = pathname.startsWith(item.href);
             return (
               <Link
