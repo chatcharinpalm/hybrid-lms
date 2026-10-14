@@ -12,6 +12,11 @@ const nextConfig = {
       },
     ];
   },
+  webpack(config) {
+    // pdfjs-dist (PDF exam import) can use node-canvas on a server; the browser never needs it.
+    config.resolve.alias.canvas = false;
+    return config;
+  },
 };
 
 export default nextConfig;
