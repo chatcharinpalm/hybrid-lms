@@ -172,6 +172,10 @@ model Exam {
   // blocks (headings, instructions, tables, images, and question blocks that reference
   // Question ids). Null for exams authored in the back office or seeded.
   paperJson String? @db.Text
+  // Combined exams (several chapters in one): how many questions each student
+  // draws from each group, JSON [{ group, label, count }] (see services/draw.ts).
+  // Null = every question of the exam.
+  drawJson String? @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -192,6 +196,9 @@ model Question {
   order  Int    @default(0) // authoring order (randomized at attempt time)
   // For SHORT_ANSWER, exact/normalized match or hash comparison
   answerKey String? @db.Text
+  // Combined exams: the group (source exam) this question was copied from; its
+  // Option Bank and the per-student draw go by group. Null on ordinary exams.
+  group     String? @db.VarChar(64)
 
   exam    Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
   options QuestionOption[]

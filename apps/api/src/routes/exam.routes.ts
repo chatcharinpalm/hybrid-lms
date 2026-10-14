@@ -8,6 +8,8 @@ export const examRouter = Router();
 examRouter.post("/", requireAuth, requireRole("TEACHER", "ADMIN"), examController.createExam);
 // An exam from the teacher's own document (Word/PDF), layout kept.
 examRouter.post("/import-document", requireAuth, requireRole("TEACHER", "ADMIN"), examController.importDocumentExam);
+// One exam from several chapters; each student draws a set number from each.
+examRouter.post("/combine", requireAuth, requireRole("TEACHER", "ADMIN"), examController.combineExams);
 // Public browsing: the exam center list (title/schedule/status) is viewable
 // without login â€” only starting an attempt below requires a student login.
 examRouter.get("/course/:courseId", optionalAuth, examController.listExamsForCourse);
@@ -76,6 +78,7 @@ examRouter.get(
 // Teacher/Admin: back-office controls
 const staff = [requireAuth, requireRole("TEACHER", "ADMIN")];
 examRouter.post("/:examId/status", ...staff, examController.setExamStatus);
+examRouter.delete("/:examId", ...staff, examController.deleteExam);
 examRouter.get("/:examId/audit", ...staff, examController.getExamAuditLog);
 examRouter.post("/attempts/:attemptId/control/force-submit", ...staff, examController.forceSubmitAttempt);
 examRouter.post("/attempts/:attemptId/control/reset", ...staff, examController.resetAttempt);

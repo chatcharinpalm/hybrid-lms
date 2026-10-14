@@ -3,6 +3,7 @@ import { prisma } from "../prisma";
 import { byThaiName } from "../utils/roster";
 import { generateRandomSeed, seededShuffle } from "../utils/shuffle";
 import { dealBlocks, fixedOptionIds, readPaper, slotOrder } from "./paperDocument";
+import { drawnCount, drawQuestions, readDraw } from "./draw";
 
 export class ExamRuleError extends Error {}
 
@@ -65,6 +66,22 @@ function questionSecondsLeft(attempt: AttemptRow, exam: TimedExam): number | nul
   return Math.max(0, Math.ceil((deadline - Date.now()) / 1000));
 }
 
+/** The questions this attempt sits (combined exams: the ones its seed drew), as id/type rows. */
+async function attemptQuestions(exam: { id: string; drawJson: string | null }, seed: string) {
+  const questions = await prisma.question.findMany({
+    where: { examId: exam.id },
+    select: { id: true, type: true, group: true, order: true },
+  });
+  return drawQuestions(questions, exam.drawJson, seed);
+}
+
+/** How many questions each attempt of the exam has. */
+async function examQuestionCount(exam: { id: string; drawJson: string | null }) {
+  if (!exam.drawJson) return prisma.question.count({ where: { examId: exam.id } });
+  const questions = await prisma.question.findMany({ where: { examId: exam.id }, select: { id: true, group: true, order: true } });
+  return drawnCount(questions, exam.drawJson);
+}
+
 /** The question order this attempt sees (stable for a given seed). */
 async function loadOrderedQuestionIds(examId: string, attempt: AttemptRow, shuffle: boolean) {
   const questions = await prisma.question.findMany({
@@ -79,11 +96,14 @@ type DealtExam = {
   shuffleQuestions: boolean;
   shuffleOptions: boolean;
   paperJson: string | null;
+  drawJson: string | null;
   questions: Array<{
     id: string;
     type: string;
     prompt: string;
     points: number;
+    order: number;
+    group: string | null;
     options: Array<{ id: string; label: string; code: string | null; order: number; isCorrect: boolean }>;
   }>;
 };
@@ -98,20 +118,28 @@ type DealtExam = {
  * callers sending this to a student must strip it.
  */
 function dealPaper(exam: DealtExam, seed: string) {
+  // Combined exams: only the questions this student drew from each chapter.
+  const drawn = drawQuestions(exam.questions, exam.drawJson, seed);
+  const rules = readDraw(exam.drawJson);
   // Imported documents: parts shuffled block by block, in the document's layout.
   const blocks = readPaper(exam.paperJson);
   const document = blocks && dealBlocks(blocks, seed, exam.shuffleQuestions);
   const fixedOptions = blocks ? fixedOptionIds(blocks) : new Set<string>();
-  const byId = new Map(exam.questions.map((q) => [q.id, q]));
+  const byId = new Map(drawn.map((q) => [q.id, q]));
+  const shuffled = (list: typeof drawn, key: string) => (exam.shuffleQuestions ? seededShuffle(list, key) : list);
   const questionOrder = document
     ? slotOrder(document).flatMap((id) => byId.get(id) ?? [])
-    : exam.shuffleQuestions
-      ? seededShuffle(exam.questions, seed)
-      : exam.questions;
+    : rules
+      ? // Chapter by chapter (each with its own Option Bank), shuffled within each.
+        [
+          ...rules.flatMap((r) => shuffled(drawn.filter((q) => q.group === r.group), `${seed}:${r.group}`)),
+          ...shuffled(drawn.filter((q) => !rules.some((r) => r.group === q.group)), seed),
+        ]
+      : shuffled(drawn, seed);
 
   const bankRank = new Map<number, number>();
   if (exam.shuffleOptions) {
-    const bankOrders = [...new Set(exam.questions.filter((q) => q.type === "FILL_IN_BANK").flatMap((q) => q.options.map((o) => o.order)))];
+    const bankOrders = [...new Set(drawn.filter((q) => q.type === "FILL_IN_BANK").flatMap((q) => q.options.map((o) => o.order)))];
     seededShuffle(bankOrders.sort((a, b) => a - b), `${seed}:bank`).forEach((order, i) => bankRank.set(order, i));
   }
 
@@ -131,6 +159,7 @@ function dealPaper(exam: DealtExam, seed: string) {
       type: q.type,
       prompt: q.prompt,
       points: q.points,
+      group: q.group,
       options: optionOrder.map((o, i) => ({
         id: o.id,
         label: o.label,
@@ -312,6 +341,8 @@ export async function startOrResumeAttempt(examId: string, studentId: string) {
     questions: paper,
     /** Imported documents: the paper's layout as this student's blocks (null otherwise). */
     document: dealt.document,
+    /** Combined exams: the chapters in paper order, each a part with its own Option Bank (null otherwise). */
+    groups: readDraw(exam.drawJson)?.map(({ group, label, count }) => ({ group, label, count })) ?? null,
   };
 }
 
@@ -336,7 +367,8 @@ export async function saveAnswer(
   } else {
     const current = await applyQuestionTimeout(attempt, exam, 0);
     if (current.status !== "IN_PROGRESS") throw new ExamRuleError("หมดเวลาทำข้อสอบแล้ว ระบบส่งคำตอบให้อัตโนมัติ");
-    const question = await prisma.question.findFirst({ where: { id: questionId, examId: exam.id }, select: { type: true } });
+    // Combined exams: only questions this attempt drew can be answered.
+    const question = (await attemptQuestions(exam, attempt.randomSeed)).find((q) => q.id === questionId);
     if (!question) throw new ExamRuleError("Question not found");
     // A blank may be changed until the paper is handed in, but not emptied.
     if (question.type === "FILL_IN_BANK" && !payload.selectedOptionIds?.length) {
@@ -401,11 +433,15 @@ export async function submitAttempt(attemptId: string, studentId: string) {
   // Students hand in only a complete paper — unless time is up, when what they have is taken.
   const timeUp = !exam.timePerQuestionSeconds && Date.now() >= overallDeadline(attempt, exam) - ANSWER_GRACE_MS;
   if (!exam.timePerQuestionSeconds && !timeUp) {
-    const [total, answers] = await Promise.all([
-      prisma.question.count({ where: { examId: exam.id } }),
-      prisma.examAnswer.findMany({ where: { attemptId }, select: { selectedOptionIds: true, textAnswer: true } }),
+    const [questions, answers] = await Promise.all([
+      attemptQuestions(exam, attempt.randomSeed),
+      prisma.examAnswer.findMany({ where: { attemptId }, select: { questionId: true, selectedOptionIds: true, textAnswer: true } }),
     ]);
-    const answered = answers.filter((a) => (JSON.parse(a.selectedOptionIds) as string[]).length > 0 || a.textAnswer?.trim()).length;
+    const total = questions.length;
+    const ids = new Set(questions.map((q) => q.id));
+    const answered = answers.filter(
+      (a) => ids.has(a.questionId) && ((JSON.parse(a.selectedOptionIds) as string[]).length > 0 || a.textAnswer?.trim())
+    ).length;
     if (answered < total) throw new ExamRuleError(`ยังตอบไม่ครบ เหลืออีก ${total - answered} ข้อ ต้องตอบให้ครบทุกข้อก่อนส่ง`);
   }
   return gradeAndSubmit(attemptId, "SUBMITTED", "STUDENT");
@@ -436,7 +472,8 @@ export async function gradeAndSubmit(
   // Answers grouped by result, written in a few queries instead of one per question.
   const marks = new Map<string, { isCorrect: boolean; pointsAwarded: number; ids: string[] }>();
 
-  for (const question of attempt.exam.questions) {
+  // Combined exams: marked out of the questions this attempt drew.
+  for (const question of drawQuestions(attempt.exam.questions, attempt.exam.drawJson, attempt.randomSeed)) {
     // Essays are read and marked by the teacher; the automatic score leaves them out.
     if (question.type === "ESSAY") continue;
     total += question.points;
@@ -510,7 +547,7 @@ async function requireOwnedInProgressAttempt(attemptId: string, studentId: strin
 export async function updateProgress(attemptId: string, studentId: string, requestedIndex: number) {
   let attempt = await requireOwnedInProgressAttempt(attemptId, studentId);
   const exam = await prisma.exam.findUniqueOrThrow({ where: { id: attempt.examId } });
-  const totalQuestions = await prisma.question.count({ where: { examId: exam.id } });
+  const totalQuestions = await examQuestionCount(exam);
 
   attempt = await applyQuestionTimeout(attempt, exam, totalQuestions);
   if (attempt.status !== "IN_PROGRESS") {
@@ -562,7 +599,7 @@ export async function getLiveState(attemptId: string, studentId: string) {
   const exam = await prisma.exam.findUniqueOrThrow({ where: { id: attempt.examId } });
 
   if (attempt.status === "IN_PROGRESS") {
-    const totalQuestions = await prisma.question.count({ where: { examId: exam.id } });
+    const totalQuestions = await examQuestionCount(exam);
     attempt = await applyQuestionTimeout(attempt, exam, totalQuestions);
   }
 
@@ -595,7 +632,7 @@ export async function getMyLatestResult(examId: string, studentId: string) {
   const exam = await prisma.exam.findUnique({
     where: { id: examId },
     // Essays are marked by the teacher, so the automatic score is out of the other questions.
-    select: { title: true, maxAttempts: true, status: true, _count: { select: { questions: { where: { type: { not: "ESSAY" } } } } } },
+    select: { id: true, title: true, maxAttempts: true, status: true, drawJson: true, _count: { select: { questions: { where: { type: { not: "ESSAY" } } } } } },
   });
   if (!exam) throw new ExamRuleError("Exam not found");
   const [latest, attemptCount] = await Promise.all([
@@ -605,9 +642,14 @@ export async function getMyLatestResult(examId: string, studentId: string) {
     }),
     prisma.examAttempt.count({ where: { examId, studentId } }),
   ]);
+  // Combined exams: out of the questions this student's attempt drew.
+  const totalQuestions =
+    exam.drawJson && latest
+      ? (await attemptQuestions(exam, latest.randomSeed)).filter((q) => q.type !== "ESSAY").length
+      : exam._count.questions;
   return {
     examTitle: exam.title,
-    totalQuestions: exam._count.questions,
+    totalQuestions,
     canRetake: exam.status === "OPEN" && (exam.maxAttempts <= 0 || attemptCount < exam.maxAttempts),
     attemptCount,
     latest: latest && {
@@ -636,12 +678,14 @@ export async function getLiveProctoringData(examId: string) {
     where: { id: examId },
     include: {
       questions: {
-        select: { id: true, prompt: true, order: true },
+        select: { id: true, prompt: true, order: true, group: true },
         orderBy: { order: "asc" },
       },
     },
   });
   if (!exam) throw new ExamRuleError("Exam not found");
+  // Every attempt has this many questions (combined exams draw a set number per chapter).
+  const totalQuestions = drawnCount(exam.questions, exam.drawJson);
 
   // The course's class list, room by room, ก–ฮ within a room (the sign-in sheet order).
   const studentSelect = {
@@ -677,7 +721,7 @@ export async function getLiveProctoringData(examId: string) {
   // Close out attempts whose time ran out while nobody had the exam open
   // (e.g. the student closed the browser), so the monitor doesn't show them running forever.
   const running = await prisma.examAttempt.findMany({ where: { examId, status: "IN_PROGRESS" } });
-  for (const a of running) await applyQuestionTimeout(a, exam, exam.questions.length);
+  for (const a of running) await applyQuestionTimeout(a, exam, totalQuestions);
 
   // Get all attempts for this exam
   // Oldest first, so the Map below keeps each student's latest attempt.
@@ -726,7 +770,7 @@ export async function getLiveProctoringData(examId: string) {
       submittedAt: attempt?.submittedAt ?? null,
       currentQuestionIndex: attempt ? attempt.currentQuestionIndex : 0,
       answeredCount: attempt ? attempt.answers.length : 0,
-      totalQuestions: exam.questions.length,
+      totalQuestions,
       violationCount: attempt ? attempt.violationCount : 0,
       scorePoints: attempt?.scorePoints ?? null,
       scorePercent: attempt?.scorePercent ?? null,
@@ -779,7 +823,7 @@ export async function getLiveProctoringData(examId: string) {
       id: exam.id,
       timePerQuestionSeconds: exam.timePerQuestionSeconds,
       title: exam.title,
-      totalQuestions: exam.questions.length,
+      totalQuestions,
       durationMinutes: exam.durationMinutes,
       maxViolations: exam.maxViolations,
       status: exam.status,

@@ -67,12 +67,16 @@ export function DocumentExam({ paper, answers, onAnswerChange, onPageChange, onS
 
   // The Option Bank opens beside the paper when a blank is tapped (phones: along the bottom).
   const [panelFor, setPanelFor] = useState<string | null>(null);
+  // The exam screen itself never scrolls (fixed to the window), so the paper scrolls in here.
+  const scrollRef = useRef<HTMLDivElement>(null);
   const openPanel = (id: string, el: HTMLElement) => {
     setPanelFor(id);
     if (window.matchMedia("(min-width: 768px)").matches) return;
     requestAnimationFrame(() => {
-      const top = el.getBoundingClientRect().top;
-      if (top > window.innerHeight * 0.35 || top < 0) window.scrollBy({ top: top - 110, behavior: "smooth" });
+      const box = scrollRef.current;
+      if (!box) return;
+      const top = el.getBoundingClientRect().top - box.getBoundingClientRect().top;
+      if (top > box.clientHeight * 0.35 || top < 0) box.scrollBy({ top: top - 110, behavior: "smooth" });
     });
   };
   const panelQuestion = panelFor ? byId.get(panelFor) : undefined;
@@ -81,7 +85,10 @@ export function DocumentExam({ paper, answers, onAnswerChange, onPageChange, onS
 
   return (
     // With the bank open, the paper moves left to make room for it.
-    <div className={`transition-[margin] duration-200 ${panelFor ? `${BANK_PANEL_SHIFT} max-md:pb-[55vh]` : ""}`}>
+    <div
+      ref={scrollRef}
+      className={`h-full overflow-y-auto px-2 pt-4 transition-[margin] duration-200 sm:px-4 ${panelFor ? `${BANK_PANEL_SHIFT} max-md:pb-[55vh]` : ""}`}
+    >
     <div className="mx-auto max-w-[860px] space-y-4 pb-28">
       <div className="rounded-sm bg-white px-6 py-8 shadow-2xl shadow-black/40 sm:px-14 sm:py-12">
         <DocumentPaper

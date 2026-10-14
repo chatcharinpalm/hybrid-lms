@@ -61,6 +61,26 @@ export async function setCourseVisibility(req: Request, res: Response) {
   return res.json(course);
 }
 
+/** Deletes a course with everything in it: its exams and their results, class list, sessions and materials. */
+export async function deleteCourse(req: Request, res: Response) {
+  const course = await prisma.course.findUnique({
+    where: { id: req.params.courseId },
+    select: { id: true, title: true, _count: { select: { exams: true, enrollments: true } } },
+  });
+  if (!course) return res.status(404).json({ error: "Course not found" });
+  await prisma.course.delete({ where: { id: course.id } });
+  await prisma.auditLog.create({
+    data: {
+      actorId: req.user!.id,
+      action: "COURSE_DELETED",
+      entity: "Course",
+      entityId: course.id,
+      metadata: JSON.stringify({ title: course.title, exams: course._count.exams, students: course._count.enrollments }),
+    },
+  });
+  return res.json({ ok: true });
+}
+
 const createCourseSchema = z.object({
   // Course codes aren't shown anywhere; one is generated when none is given.
   code: z.string().trim().optional(),

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { apiFetch } from "@/lib/api";
 import type { PortalMenu, PortalSettings } from "@/lib/portalSettings";
+import { ConfirmDelete } from "@/components/backoffice/ConfirmDelete";
 
 interface Course {
   id: string;
@@ -74,7 +75,7 @@ export default function CoursesVisibilityPage() {
       <div className="flex flex-wrap items-end justify-between gap-4 border-b border-outline-variant/30 pb-4">
         <div>
           <h1 className="text-lg font-semibold text-on-surface">รายวิชา &amp; การแสดงผล</h1>
-          <p className="text-xs text-outline">เลือกว่านักศึกษาจะเห็นรายวิชาและเมนูใดบ้าง มีผลทันที</p>
+          <p className="text-xs text-outline">เลือกว่านักศึกษาจะเห็นรายวิชาและเมนูใดบ้าง มีผลทันที · ลบรายวิชาที่ไม่ใช้แล้วได้</p>
         </div>
         <Link
           href="/backoffice/courses/new"
@@ -107,6 +108,18 @@ export default function CoursesVisibilityPage() {
                 {course.isHidden ? "ซ่อนจากนักศึกษา" : "นักศึกษาเห็น"}
               </span>
               <Switch on={!course.isHidden} disabled={busy === course.id} onClick={() => toggleCourse(course)} />
+              <ConfirmDelete
+                title={course.title}
+                consequences={[
+                  `แบบทดสอบ ${course.examCount} ชุด พร้อมผลสอบและคำตอบของนักศึกษาทั้งหมด`,
+                  "รายชื่อนักศึกษาในรายวิชา (บัญชีนักศึกษายังอยู่)",
+                  "คาบเรียน การเช็คชื่อ และเอกสารประกอบการเรียน",
+                ]}
+                onDelete={async () => {
+                  await apiFetch(`/api/courses/${course.id}`, { method: "DELETE" });
+                  setCourses((list) => list?.filter((c) => c.id !== course.id) ?? null);
+                }}
+              />
             </div>
           ))}
         </div>

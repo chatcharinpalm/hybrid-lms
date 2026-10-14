@@ -26,6 +26,15 @@ export interface ExamQuestion {
   prompt: string;
   points: number;
   options: ExamOption[];
+  /** Combined exams: the chapter (group) the question comes from; null otherwise. */
+  group?: string | null;
+}
+
+/** Combined exams: one chapter, a part of the paper with its own Option Bank. */
+export interface ExamGroup {
+  group: string;
+  label: string;
+  count: number;
 }
 
 export interface ExamSecurityConfig {
@@ -61,6 +70,8 @@ export interface ExamPaper {
   questions: ExamQuestion[];
   /** Imported documents: this student's paper in the document's layout. */
   document?: PaperBlock[] | null;
+  /** Combined exams: the chapters in paper order (questions come grouped in this order). */
+  groups?: ExamGroup[] | null;
 }
 
 export type ViolationType =

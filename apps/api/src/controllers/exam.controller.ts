@@ -7,6 +7,8 @@ import * as examSession from "../services/examSession.service";
 import { ExamRuleError } from "../services/examSession.service";
 import * as proctorControl from "../services/proctorControl.service";
 import { sanitizePaperHtml, type PaperBlock } from "../services/paperDocument";
+import type { DrawRule } from "../services/draw";
+import type { Prisma } from "@prisma/client";
 
 const createExamSchema = z.object({
   courseId: z.string().uuid(),
@@ -223,12 +225,108 @@ export async function importDocumentExam(req: Request, res: Response) {
   return res.status(201).json(exam);
 }
 
+const combineSchema = z.object({
+  courseId: z.string().uuid(),
+  title: z.string().trim().min(1).max(300),
+  durationMinutes: z.number().int().positive().max(600),
+  /** Chapters in paper order; count = questions each student draws from that chapter. */
+  sources: z
+    .array(z.object({ examId: z.string().uuid(), count: z.number().int().min(1).max(500) }))
+    .min(1)
+    .max(20)
+    .refine((s) => new Set(s.map((x) => x.examId)).size === s.length, "เลือกบทซ้ำกัน"),
+});
+
+/**
+ * Back office: one exam from several chapters. Each chapter's questions (and
+ * Option Bank) are copied in under a group, and every student draws the set
+ * number from each chapter (services/draw.ts) — a different set per student.
+ * The source exams are left as they are. The room starts closed.
+ */
+export async function combineExams(req: Request, res: Response) {
+  const parsed = combineSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.issues.map((i) => i.message).join("\n") });
+  const data = parsed.data;
+  const course = await prisma.course.findUnique({ where: { id: data.courseId }, select: { id: true } });
+  if (!course) return res.status(404).json({ error: "ไม่พบรายวิชา" });
+
+  const sources = await prisma.exam.findMany({
+    where: { id: { in: data.sources.map((s) => s.examId) } },
+    select: {
+      id: true,
+      title: true,
+      timePerQuestionSeconds: true,
+      questions: { include: { options: true }, orderBy: [{ order: "asc" }, { id: "asc" }] },
+    },
+  });
+  const byId = new Map(sources.map((s) => [s.id, s]));
+  const examId = randomUUID();
+  const questions: Array<Prisma.QuestionCreateManyInput> = [];
+  const options: Array<Prisma.QuestionOptionCreateManyInput> = [];
+  const rules: DrawRule[] = [];
+  for (const pick of data.sources) {
+    const source = byId.get(pick.examId);
+    if (!source) return res.status(404).json({ error: "ไม่พบแบบทดสอบต้นทาง" });
+    if (source.questions.length === 0) return res.status(400).json({ error: `"${source.title}" ไม่มีข้อสอบ` });
+    // The group is the source exam's id: one Option Bank per chapter.
+    rules.push({ group: source.id, label: source.title, count: Math.min(pick.count, source.questions.length) });
+    for (const q of source.questions) {
+      const id = randomUUID();
+      questions.push({
+        id,
+        examId,
+        type: q.type,
+        prompt: q.prompt,
+        points: q.points,
+        order: questions.length + 1,
+        answerKey: q.answerKey,
+        group: source.id,
+      });
+      for (const o of q.options) options.push({ questionId: id, label: o.label, code: o.code, isCorrect: o.isCorrect, order: o.order });
+    }
+  }
+  const total = rules.reduce((n, r) => n + r.count, 0);
+
+  const [exam] = await prisma.$transaction([
+    prisma.exam.create({
+      data: {
+        id: examId,
+        courseId: course.id,
+        title: data.title,
+        description: `จำนวน ${total} ข้อ (สุ่มจาก ${rules.length} บท)`,
+        durationMinutes: data.durationMinutes,
+        timePerQuestionSeconds: null,
+        maxAttempts: 0,
+        status: "CLOSED",
+        shuffleQuestions: true,
+        shuffleOptions: true,
+        drawJson: JSON.stringify(rules),
+      },
+      select: { id: true, title: true },
+    }),
+    prisma.question.createMany({ data: questions }),
+    prisma.questionOption.createMany({ data: options }),
+  ]);
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: req.user!.id,
+      action: "EXAM_COMBINED",
+      entity: "Exam",
+      entityId: exam.id,
+      metadata: JSON.stringify({ sources: rules.map((r) => ({ examId: r.group, count: r.count })), questions: questions.length }),
+    },
+  });
+  return res.status(201).json(exam);
+}
+
 export async function listExamsForCourse(req: Request, res: Response) {
   const staff = req.user?.role === "TEACHER" || req.user?.role === "ADMIN";
   const exams = await prisma.exam.findMany({
     // A hidden course's exams are listed for staff only.
     where: { courseId: req.params.courseId, ...(staff ? {} : { course: { isHidden: false } }) },
     orderBy: { createdAt: "desc" },
+    include: { _count: { select: { questions: true } } },
   });
   return res.json(exams);
 }
@@ -367,6 +465,26 @@ async function control(res: Response, action: () => Promise<unknown>) {
 
 const actor = (req: Request) => ({ id: req.user!.id, role: req.user!.role });
 const reasonSchema = z.object({ reason: z.string().max(500).optional() });
+
+/** Deletes an exam with its questions and every attempt, answer and violation record. */
+export async function deleteExam(req: Request, res: Response) {
+  const exam = await prisma.exam.findUnique({
+    where: { id: req.params.examId },
+    select: { id: true, title: true, courseId: true, _count: { select: { attempts: true } } },
+  });
+  if (!exam) return res.status(404).json({ error: "Exam not found" });
+  await prisma.exam.delete({ where: { id: exam.id } });
+  await prisma.auditLog.create({
+    data: {
+      actorId: req.user!.id,
+      action: "EXAM_DELETED",
+      entity: "Exam",
+      entityId: exam.id,
+      metadata: JSON.stringify({ title: exam.title, courseId: exam.courseId, attempts: exam._count.attempts }),
+    },
+  });
+  return res.json({ ok: true });
+}
 
 export async function setExamStatus(req: Request, res: Response) {
   const { status } = z.object({ status: z.enum(["OPEN", "CLOSED"]) }).parse(req.body);

@@ -27,9 +27,18 @@ interface LiveState {
 }
 
 /** Imported documents, and answer-bank exams without per-question timers, are shown as paper. */
-const isPaperExam = (paper: ExamPaper) =>
-  !!paper.document ||
-  (!paper.timePerQuestionSeconds && paper.questions.length > 0 && paper.questions.every((q) => q.type === "FILL_IN_BANK"));
+const isPaperExam = (paper: ExamPaper) => !!paper.document || isBankPaper(paper);
+
+/**
+ * Answer-bank papers (one blank per question) use the A4 flip-book with the
+ * Option Bank table, imported or not; any other imported document is shown
+ * in its own layout.
+ */
+const isBankPaper = (paper: ExamPaper) =>
+  !paper.timePerQuestionSeconds &&
+  paper.questions.length > 0 &&
+  paper.questions.every((q) => q.type === "FILL_IN_BANK") &&
+  (paper.document ?? []).every((b) => b.t !== "q" || b.slots.length === 1);
 
 export default function ExamSessionPage() {
   const { examId } = useParams<{ examId: string }>();
@@ -238,7 +247,7 @@ export default function ExamSessionPage() {
             ? `ข้อละ ${Math.round(paper.timePerQuestionSeconds / 60)} นาที`
             : `${paper.durationMinutes} นาที`,
         },
-        { icon: paperMode ? "auto_stories" : "quiz", label: paper.document ? "ตามเอกสาร" : paperMode ? "เติมคำ" : "ปรนัย" },
+        { icon: paperMode ? "auto_stories" : "quiz", label: paper.document && !isBankPaper(paper) ? "ตามเอกสาร" : paperMode ? "เติมคำ" : "ปรนัย" },
       ]}
       progress={{
         done: paper.questions.filter((q) => answers[q.id]?.selectedOptionIds?.length || answers[q.id]?.textAnswer?.trim())
@@ -251,7 +260,7 @@ export default function ExamSessionPage() {
       onExpire={handleSubmit}
       onForceSubmit={handleSubmit}
     >
-      {paper.document ? (
+      {paper.document && !isBankPaper(paper) ? (
         <DocumentExam
           paper={paper}
           answers={answers}

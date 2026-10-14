@@ -45,9 +45,23 @@ const normalizeCode = (s: string) =>
 
 /** One flowable piece of the paper; pages are packed from these by measured height. */
 type Block =
-  | { key: string; kind: "info" | "part1" | "part2" }
-  | { key: string; kind: "bankRow"; row: number }
+  | { key: string; kind: "info" }
+  | { key: string; kind: "part1" | "part2"; sec: number }
+  | { key: string; kind: "bankRow"; sec: number; row: number }
   | { key: string; kind: "question"; index: number };
+
+/**
+ * A part of the paper with its own Option Bank: the whole paper, or on a
+ * combined exam one chapter. `label` is the chapter's name (null on a
+ * single-chapter paper, which keeps the Word file's own headings).
+ */
+interface Section {
+  label: string | null;
+  /** Indexes into paper.questions (which come grouped by chapter). */
+  questions: number[];
+  bank: ExamOption[];
+  codes: string[];
+}
 
 /**
  * The exam as the Word paper: one A4 sheet at a time, shrunk so the whole
@@ -63,20 +77,35 @@ type Block =
  */
 export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubmit }: PaperExamProps) {
   const questions = paper.questions;
-  // Every question lists the bank in the same (per-student) order.
-  const bank = useMemo(() => questions[0]?.options ?? [], [questions]);
-  const bankCodes = useMemo(() => bank.map(codeOf), [bank]);
-  const bankRows = Math.ceil(bank.length / 3);
+  // Every question of a section lists its bank in the same (per-student) order.
+  const sections = useMemo<Section[]>(() => {
+    const parts = paper.groups?.length
+      ? paper.groups.map((g) => ({ label: g.label, questions: questions.flatMap((q, i) => (q.group === g.group ? [i] : [])) }))
+      : [{ label: null, questions: questions.map((_, i) => i) }];
+    return parts
+      .filter((p) => p.questions.length > 0)
+      .map((p) => {
+        const bank = questions[p.questions[0]].options;
+        return { ...p, bank, codes: bank.map(codeOf) };
+      });
+  }, [paper.groups, questions]);
+  const sectionOf = useMemo(() => {
+    const map = new Map<number, number>();
+    sections.forEach((s, si) => s.questions.forEach((qi) => map.set(qi, si)));
+    return map;
+  }, [sections]);
 
   const blocks = useMemo<Block[]>(
     () => [
       { key: "info", kind: "info" },
-      { key: "part1", kind: "part1" },
-      ...Array.from({ length: bankRows }, (_, row) => ({ key: `row${row}`, kind: "bankRow" as const, row })),
-      { key: "part2", kind: "part2" },
-      ...questions.map((_, index) => ({ key: `q${index}`, kind: "question" as const, index })),
+      ...sections.flatMap((s, sec): Block[] => [
+        { key: `part1-${sec}`, kind: "part1", sec },
+        ...Array.from({ length: Math.ceil(s.bank.length / 3) }, (_, row) => ({ key: `row${sec}-${row}`, kind: "bankRow" as const, sec, row })),
+        { key: `part2-${sec}`, kind: "part2", sec },
+        ...s.questions.map((index) => ({ key: `q${index}`, kind: "question" as const, index })),
+      ]),
     ],
-    [bankRows, questions]
+    [sections]
   );
 
   // ── Pagination by measurement ────────────────────────────────
@@ -242,16 +271,23 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
     return i >= 0 ? codeOf(q.options[i], i) : null;
   })();
 
-  // Entries already used in a confirmed answer fade in the bank (each question has its own option rows, so match by text).
+  // Entries already used in a confirmed answer fade in their section's bank
+  // (each question has its own option rows, so match by section and text: usedKey).
   const usedLabels = useMemo(() => {
     const used = new Set<string>();
-    for (const q of questions) {
+    questions.forEach((q, qi) => {
       const id = answers[q.id]?.selectedOptionIds?.[0];
       const o = id ? q.options.find((x) => x.id === id) : undefined;
-      if (o) used.add(o.label);
-    }
+      if (o) used.add(usedKey(sectionOf.get(qi) ?? 0, o.label));
+    });
     return used;
-  }, [answers, questions]);
+  }, [answers, questions, sectionOf]);
+  // The bank shown in the panel: the open blank's section, else the one on the page in view.
+  const panelSection = (() => {
+    if (panelQuestionIndex >= 0) return sectionOf.get(panelQuestionIndex) ?? 0;
+    const onPage = pageList[page]?.find((b) => b.kind !== "info");
+    return onPage ? (onPage.kind === "question" ? sectionOf.get(onPage.index) ?? 0 : onPage.sec) : 0;
+  })();
   const allAnswered = answeredCount === questions.length;
 
   const watermark = `${paper.student.fullName} ${paper.student.studentCode ?? ""}`.trim();
@@ -259,8 +295,7 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
     <BlockFlow
       blocks={list}
       paper={paper}
-      bankCodes={bankCodes}
-      bank={bank}
+      sections={sections}
       usedLabels={usedLabels}
       questions={questions}
       answers={answers}
@@ -386,7 +421,12 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
 
       {panel && (
         <BankPanel
-          entries={bank.map((o, i) => ({ code: bankCodes[i], label: o.label, used: usedLabels.has(o.label) }))}
+          entries={(sections[panelSection]?.bank ?? []).map((o, i) => ({
+            code: sections[panelSection].codes[i],
+            label: o.label,
+            used: usedLabels.has(usedKey(panelSection, o.label)),
+          }))}
+          title={sections[panelSection]?.label ?? undefined}
           questionLabel={panelQuestionIndex >= 0 ? `ข้อ ${panelQuestionIndex + 1}` : null}
           selectedCode={panelSelected}
           onPick={(code) => {
@@ -494,12 +534,14 @@ function Sheet({
   );
 }
 
+/** A bank entry's "used" key: section + words (each section has its own bank). */
+const usedKey = (sec: number, label: string) => `${sec}\u0000${label}`;
+
 interface BlockFlowProps {
   blocks: Block[];
   paper: ExamPaper;
-  bank: ExamOption[];
-  bankCodes: string[];
-  /** Entries already given as an answer; faded in the table. */
+  sections: Section[];
+  /** Entries already given as an answer (usedKey); faded in the table. */
   usedLabels: Set<string>;
   questions: ExamQuestion[];
   answers: AnswerMap;
@@ -514,32 +556,41 @@ interface BlockFlowProps {
 const BANK_GRID = "grid grid-cols-[13%_20.33%_13%_20.33%_13%_20.34%]";
 
 /** Renders a run of blocks; consecutive bank rows share one table with a header row. */
-function BlockFlow({ blocks, paper, bank, bankCodes, usedLabels, questions, answers, measuring, activeBlank, onFocusBlank, onAnswerChange }: BlockFlowProps) {
+function BlockFlow({ blocks, paper, sections, usedLabels, questions, answers, measuring, activeBlank, onFocusBlank, onAnswerChange }: BlockFlowProps) {
   const out: React.ReactNode[] = [];
   const tag = (key: string) => (measuring ? { "data-block": key } : {});
-  const longestLabel = bank.reduce((l, o) => (o.label.length > l.length ? o.label : l), "");
+  const longest = sections.map((s) => s.bank.reduce((l, o) => (o.label.length > l.length ? o.label : l), ""));
+  const sectionOfQuestion = new Map<number, number>();
+  sections.forEach((s, si) => s.questions.forEach((qi) => sectionOfQuestion.set(qi, si)));
+  const combined = sections.length > 1 || sections[0]?.label != null;
 
   for (let i = 0; i < blocks.length; i++) {
     const b = blocks[i];
     if (b.kind === "bankRow") {
+      const sec = b.sec;
+      const { bank, codes } = sections[sec];
       const rows: number[] = [];
-      while (i < blocks.length && blocks[i].kind === "bankRow") {
+      while (i < blocks.length && blocks[i].kind === "bankRow" && (blocks[i] as { sec: number }).sec === sec) {
         rows.push((blocks[i] as { row: number }).row);
         i++;
       }
       i--;
       out.push(
-        <div key={`t${rows[0]}`} className="border-l border-t border-black text-[15.5px] leading-snug">
+        <div key={`t${sec}-${rows[0]}`} className="border-l border-t border-black text-[15.5px] leading-snug">
           <div {...tag("thead")} className={BANK_GRID}>
             {[0, 1, 2].map((c) => (
               <PairHeader key={c} />
             ))}
           </div>
           {rows.map((row) => (
-            <div key={row} {...tag(`row${row}`)} className={BANK_GRID}>
+            <div key={row} {...tag(`row${sec}-${row}`)} className={BANK_GRID}>
               {[0, 1, 2].map((c) => {
                 const n = row * 3 + c;
-                return n < bank.length ? <PairCells key={c} code={bankCodes[n]} label={bank[n].label} used={usedLabels.has(bank[n].label)} /> : <EmptyPair key={c} />;
+                return n < bank.length ? (
+                  <PairCells key={c} code={codes[n]} label={bank[n].label} used={usedLabels.has(usedKey(sec, bank[n].label))} />
+                ) : (
+                  <EmptyPair key={c} />
+                );
               })}
             </div>
           ))}
@@ -557,23 +608,30 @@ function BlockFlow({ blocks, paper, bank, bankCodes, usedLabels, questions, answ
         </p>
       );
     } else if (b.kind === "part1") {
+      const s = sections[b.sec];
       out.push(
-        <p key={b.key} {...tag(b.key)} className="pb-2 font-bold">
-          ส่วนที่ 1: คลังตัวเลือกสำหรับนำไปเติมในช่องว่าง (Option Bank) จำนวน {bank.length} ตัวเลือก
-        </p>
+        <div key={b.key} {...tag(b.key)} className={`pb-2 font-bold ${b.sec > 0 ? "pt-6" : ""}`}>
+          {/* Combined exams: each chapter starts with its name. */}
+          {combined && <p className="mb-1 border-b-2 border-black pb-0.5 text-[21px]">{s.label}</p>}
+          <p>
+            ส่วนที่ {b.sec * 2 + 1}: คลังตัวเลือกสำหรับนำไปเติมในช่องว่าง (Option Bank) จำนวน {s.bank.length} ตัวเลือก
+          </p>
+        </div>
       );
     } else if (b.kind === "part2") {
+      const s = sections[b.sec];
       out.push(
         <div key={b.key} {...tag(b.key)} className="pb-4 pt-5 font-bold">
           <p>
-            ส่วนที่ 2: แบบทดสอบชนิดเติมคำ (Fill-in-the-Blank Questions){" "}
-            {paper.examDescription ?? `จำนวน ${questions.length} ข้อ`}
+            ส่วนที่ {b.sec * 2 + 2}: แบบทดสอบชนิดเติมคำ (Fill-in-the-Blank Questions){" "}
+            {combined ? `จำนวน ${s.questions.length} ข้อ` : paper.examDescription ?? `จำนวน ${questions.length} ข้อ`}
           </p>
-          <p>คำชี้แจง: จงเลือกรหัสตัวเลือกจากส่วนที่ 1 มาเติมลงในช่องว่างของแต่ละข้อ</p>
+          <p>คำชี้แจง: จงเลือกรหัสตัวเลือกจากส่วนที่ {b.sec * 2 + 1} มาเติมลงในช่องว่างของแต่ละข้อ</p>
         </div>
       );
     } else if (b.kind === "question") {
       const q = questions[b.index];
+      const longestLabel = longest[sectionOfQuestion.get(b.index) ?? 0];
       out.push(
         <div key={b.key} {...tag(b.key)} className="pb-3">
           <PaperQuestion

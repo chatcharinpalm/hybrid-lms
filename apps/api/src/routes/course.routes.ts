@@ -21,6 +21,7 @@ courseRouter.post(
   requireRole("TEACHER", "ADMIN"),
   courseController.setCourseVisibility
 );
+courseRouter.delete("/:courseId", requireAuth, requireRole("TEACHER", "ADMIN"), courseController.deleteCourse);
 courseRouter.get("/:courseId/materials", courseController.listMaterials);
 courseRouter.post(
   "/:courseId/materials",
