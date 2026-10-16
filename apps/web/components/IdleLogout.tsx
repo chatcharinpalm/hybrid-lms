@@ -1,20 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { idleFor, isLoggedIn, logout, STUDENT_IDLE_MS, touchActivity } from "@/lib/auth";
+import { expiredLoginUrl, idleFor, idleLimit, isLoggedIn, logout, STUDENT_IDLE_MS, touchActivity } from "@/lib/auth";
 
 export const IDLE_LIMIT_MS = STUDENT_IDLE_MS;
 const WARN_MS = 30_000;
 
 /**
- * Signs a student out after 5 minutes without a mouse move, key or tap, with
- * a 30-second warning first, and at once when a page opens on a session left
- * idle that long (the next person at a lab computer must not find the last
- * student signed in). Activity in any tab counts (it is kept in localStorage).
+ * Signs the page's side out after a spell without a mouse move, key or tap —
+ * students 5 minutes, the back office 30 — with a 30-second warning first, and
+ * at once when a page opens on a session left idle that long (the next person
+ * at a shared computer must not find the last one signed in). Activity in any
+ * tab counts (it is kept in localStorage).
  *
- * `paused` — the exam screen: a student may sit thinking without touching
- * anything, so no sign-out there; the screen keeps the session marked as in
- * use for as long as it is open, and a closed exam tab still runs out.
+ * `paused` — pages watched without being touched: the student's exam screen
+ * (thinking) and the back office's proctoring pages. They keep the session
+ * marked as in use for as long as they are open; a closed tab still runs out.
  */
 export function IdleLogout({ paused = false }: { paused?: boolean }) {
   const [left, setLeft] = useState<number | null>(null);
@@ -22,12 +23,14 @@ export function IdleLogout({ paused = false }: { paused?: boolean }) {
 
   useEffect(() => {
     if (!isLoggedIn()) return;
+    const limit = idleLimit();
     const signOut = () => {
+      const to = expiredLoginUrl();
       logout();
-      window.location.href = "/login?expired=1";
+      window.location.href = to;
     };
     // A session found already idle too long: someone else's, left behind.
-    if (idleFor() > IDLE_LIMIT_MS) {
+    if (idleFor() > limit) {
       signOut();
       return;
     }
@@ -49,7 +52,7 @@ export function IdleLogout({ paused = false }: { paused?: boolean }) {
         touchActivity();
         return;
       }
-      const remaining = IDLE_LIMIT_MS - idleFor();
+      const remaining = limit - idleFor();
       if (remaining <= 0) signOut();
       else setLeft(remaining <= WARN_MS ? Math.ceil(remaining / 1000) : null);
     }, 1000);

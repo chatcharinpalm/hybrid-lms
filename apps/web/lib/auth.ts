@@ -47,6 +47,15 @@ export function storeSession(
 
 /** A student session ends after this long without use (lab computers are shared). */
 export const STUDENT_IDLE_MS = 5 * 60_000;
+/** A back-office session ends after this long without use — except while a proctoring page is open. */
+export const STAFF_IDLE_MS = 30 * 60_000;
+
+/** The idle limit for the side of the current page. */
+export const idleLimit = () => (typeof window !== "undefined" && isBackofficePath(window.location.pathname) ? STAFF_IDLE_MS : STUDENT_IDLE_MS);
+
+/** Where an idle sign-out lands: the sign-in page, on the right tab, saying why. */
+export const expiredLoginUrl = () =>
+  typeof window !== "undefined" && isBackofficePath(window.location.pathname) ? "/login?as=teacher&expired=30" : "/login?expired=5";
 
 /**
  * Last time this side was used (a mouse move, a key, a tap). Lab computers are

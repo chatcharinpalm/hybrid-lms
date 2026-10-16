@@ -251,10 +251,10 @@ function LoginForm() {
               </div>
             )}
 
-            {searchParams.get("expired") === "1" && (
+            {searchParams.get("expired") && (
               <p className="flex items-center gap-1.5 rounded-lg border border-amber-400/30 bg-amber-400/10 p-2.5 text-xs text-amber-200">
                 <span className="material-symbols-outlined text-sm">timer_off</span>
-                ออกจากระบบอัตโนมัติแล้ว เพราะไม่ได้ใช้งานเกิน 5 นาที — กรุณาเข้าสู่ระบบใหม่
+                ออกจากระบบอัตโนมัติแล้ว เพราะไม่ได้ใช้งานเกิน {searchParams.get("expired") === "30" ? 30 : 5} นาที — กรุณาเข้าสู่ระบบใหม่
               </p>
             )}
             {next && !teacherMode && (

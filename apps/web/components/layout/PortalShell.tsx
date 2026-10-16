@@ -27,7 +27,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
     if (isLoggedIn() && idleFor() > IDLE_LIMIT_MS) {
       logout();
       expiring = true;
-      window.location.replace("/login?expired=1");
+      window.location.replace("/login?expired=5");
       return;
     }
     // Already on the way to the sign-in page (effects can run twice).

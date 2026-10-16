@@ -2,9 +2,10 @@ import {
   backofficeLoginUrl,
   getStoredAccessToken as getAccessToken,
   getStoredRefreshToken,
+  expiredLoginUrl,
   idleFor,
+  idleLimit,
   isBackofficePath,
-  STUDENT_IDLE_MS,
   loginUrl,
   logout,
   storeAccessToken,
@@ -48,12 +49,12 @@ function refreshAccessToken(): Promise<boolean> {
 }
 
 export async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  // A student session left idle on a shared computer is never used for a request
+  // A session left idle (students 5 min, back office 30 min) is never used for a request
   // (e.g. a page starting an exam before the idle sign-out has redirected).
-  if (typeof window !== "undefined" && !isBackofficePath(window.location.pathname) && getAccessToken() && idleFor() > STUDENT_IDLE_MS) {
+  if (typeof window !== "undefined" && getAccessToken() && idleFor() > idleLimit()) {
     logout();
-    window.location.href = "/login?expired=1";
-    throw new ApiError("ออกจากระบบอัตโนมัติ เพราะไม่ได้ใช้งานเกิน 5 นาที", 401);
+    window.location.href = expiredLoginUrl();
+    throw new ApiError("ออกจากระบบอัตโนมัติ เพราะไม่ได้ใช้งานนานเกินกำหนด", 401);
   }
   const send = () => {
     const token = getAccessToken();
