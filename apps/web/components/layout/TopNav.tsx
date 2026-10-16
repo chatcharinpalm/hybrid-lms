@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getStoredFullName, isLoggedIn, loginUrl, logout } from "@/lib/auth";
 import type { PortalMenu } from "@/lib/portalSettings";
+import { BrandMark } from "@/components/brand/BrandMark";
 
 const NAV_ITEMS: Array<{ href: string; label: string; icon: string; menu?: PortalMenu }> = [
   { href: "/courses", label: "คอร์สเรียน", icon: "cast_for_education", menu: "courses" },
@@ -36,16 +37,10 @@ export function TopNav({ hiddenMenus }: { hiddenMenus: PortalMenu[] }) {
   };
 
   return (
-    <header className="sticky top-0 z-50 bg-surface-container-low/95 backdrop-blur border-b border-outline-variant/30">
+    <header className="sticky top-0 z-50 border-b border-[#e9c27a]/20 bg-[#0e060c]/80 backdrop-blur">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 flex items-center justify-between gap-4">
-        <Link href="/exams" className="flex items-center gap-2.5 shrink-0">
-          <div className="w-8 h-8 rounded bg-primary/10 border border-primary/25 flex items-center justify-center text-primary">
-            <span className="material-symbols-outlined text-lg">school</span>
-          </div>
-          <div className="hidden sm:flex flex-col leading-none">
-            <span className="text-sm font-semibold text-on-surface">NetSec Hub</span>
-            <span className="text-[10px] font-mono text-outline uppercase tracking-wider">Hybrid LMS</span>
-          </div>
+        <Link href="/exams" className="shrink-0">
+          <BrandMark />
         </Link>
 
         <nav className="hidden md:flex items-center gap-1">

@@ -3,25 +3,25 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ExamOption, ExamPaper, ExamQuestion } from "@/types/exam";
 import type { AnswerMap } from "./QuestionPanel";
-import { BANK_PANEL_SHIFT, BankPanel } from "./BankPanel";
+import { BankPanel, useBankPair } from "./BankPanel";
 
 /** A4 at 96 dpi (210 × 297 mm); margins about 15 mm. */
-const PAGE_W = 794;
-const PAGE_H = 1123;
-const PAD_X = 56;
-const PAD_TOP = 44;
-const PAD_BOTTOM = 56;
+export const PAGE_W = 794;
+export const PAGE_H = 1123;
+export const PAD_X = 56;
+export const PAD_TOP = 44;
+export const PAD_BOTTOM = 56;
 /** Running header (title + page number) plus its gap. */
-const HEADER_H = 46;
-const CONTENT_W = PAGE_W - PAD_X * 2;
+export const HEADER_H = 46;
+export const CONTENT_W = PAGE_W - PAD_X * 2;
 /** A little slack: the zoomed page can wrap a line differently from the measuring copy. */
-const CONTENT_H = PAGE_H - PAD_TOP - PAD_BOTTOM - HEADER_H - 12;
+export const CONTENT_H = PAGE_H - PAD_TOP - PAD_BOTTOM - HEADER_H - 12;
 /** Room beside the page for the arrow buttons. */
-const SIDE = 96;
+export const SIDE = 96;
 
 const BLANK = "______";
 /** Body text of the sheet; the measuring copy must use the same. */
-const PAPER_TEXT = "text-[19px] leading-[1.65]";
+export const PAPER_TEXT = "text-[19px] leading-[1.65]";
 
 interface PaperExamProps {
   paper: ExamPaper;
@@ -158,13 +158,6 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
     return () => ro.disconnect();
   }, []);
   const viewportW = viewport.w;
-  // Tablets and phones: no room for side arrows, so the sheet fills the width (arrows sit over its margins).
-  const compact = viewportW > 0 && viewportW < 1100;
-  const gutter = compact ? 8 : SIDE;
-  const fitW = (viewportW - gutter * 2) / PAGE_W;
-  // The whole page shows without scrolling, except on phones held upright where that would be unreadably small.
-  const fitH = (viewport.h - (compact ? 16 : 24)) / PAGE_H;
-  const scale = viewportW > 0 ? Math.max(0.3, Math.min(1, fitW, Math.max(fitH, compact ? 0.42 : 0.3))) : 1;
 
   const pageList = pages ?? [];
   const totalPages = pageList.length;
@@ -289,6 +282,18 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
     return onPage ? (onPage.kind === "question" ? sectionOf.get(onPage.index) ?? 0 : onPage.sec) : 0;
   })();
   const allAnswered = answeredCount === questions.length;
+  // Big screens: the sheet is sized by the height, so pull the bank in beside it (with the arrows' gutters).
+  const sheetW = PAGE_W * Math.max(0.3, Math.min(1, (viewport.h - 24) / PAGE_H));
+  const pair = useBankPair(Boolean(panel), sheetW + SIDE * 2);
+
+  // Tablets and phones: no room for side arrows, so the sheet fills the width (arrows sit over its margins).
+  // A big screen pairing the sheet with the bank keeps its gutters for the arrows.
+  const compact = viewportW > 0 && viewportW < 1100 && !pair.offset;
+  const gutter = compact ? 8 : SIDE;
+  const fitW = (viewportW - gutter * 2) / PAGE_W;
+  // The whole page shows without scrolling, except on phones held upright where that would be unreadably small.
+  const fitH = (viewport.h - (compact ? 16 : 24)) / PAGE_H;
+  const scale = viewportW > 0 ? Math.max(0.3, Math.min(1, fitW, Math.max(fitH, compact ? 0.42 : 0.3))) : 1;
 
   const watermark = `${paper.student.fullName} ${paper.student.studentCode ?? ""}`.trim();
   const renderBlocks = (list: Block[], measuring = false) => (
@@ -311,7 +316,7 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
 
   return (
     // With the bank open, the paper moves left to make room for it.
-    <div className={`relative flex h-full flex-col transition-[margin] duration-200 ${panel ? BANK_PANEL_SHIFT : ""}`}>
+    <div className="relative flex h-full flex-col transition-[margin] duration-200" style={pair.shift}>
       {/* Off-screen copy at print width, used to cut pages. */}
       <div
         ref={measureRef}
@@ -427,6 +432,7 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
             used: usedLabels.has(usedKey(panelSection, o.label)),
           }))}
           title={sections[panelSection]?.label ?? undefined}
+          offset={pair.offset}
           questionLabel={panelQuestionIndex >= 0 ? `ข้อ ${panelQuestionIndex + 1}` : null}
           selectedCode={panelSelected}
           onPick={(code) => {
@@ -475,7 +481,7 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
   );
 }
 
-function EdgeArrow({ side, compact, disabled, onClick }: { side: "left" | "right"; compact: boolean; disabled: boolean; onClick: () => void }) {
+export function EdgeArrow({ side, compact, disabled, onClick }: { side: "left" | "right"; compact: boolean; disabled: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -492,7 +498,7 @@ function EdgeArrow({ side, compact, disabled, onClick }: { side: "left" | "right
 }
 
 /** One A4 sheet with the Word file's running header, page footer and a name watermark. */
-function Sheet({
+export function Sheet({
   title,
   pageNumber,
   totalPages,

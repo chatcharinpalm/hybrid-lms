@@ -9,9 +9,29 @@ export interface BankEntry {
   used?: boolean;
 }
 
-/** Width of the side panel; the exam beside it moves left by the same amount (md and up). */
-export const BANK_PANEL_SHIFT = "md:mr-[min(600px,48vw)]";
+/** Width of the side panel (md and up). */
 const PANEL_W = "md:w-[min(600px,48vw)]";
+const panelWidth = (vw: number) => Math.min(600, vw * 0.48);
+
+/**
+ * Wide screens: the exam and the open bank sit together as one centred pair
+ * instead of at opposite edges of a big monitor. `contentW` is the width the
+ * exam needs (its paper plus its own gutters). Returns the bank's distance from
+ * the right edge and the margins that move the exam beside it.
+ */
+export function useBankPair(open: boolean, contentW: number) {
+  const [vw, setVw] = useState(0);
+  useEffect(() => {
+    const on = () => setVw(window.innerWidth);
+    on();
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, []);
+  if (!open || vw < 768) return { offset: 0, shift: undefined };
+  const panelW = panelWidth(vw);
+  const offset = Math.max(0, Math.floor((vw - contentW - panelW) / 2));
+  return { offset, shift: { marginLeft: offset, marginRight: panelW + offset } as React.CSSProperties };
+}
 
 /** Side panel from md up; phones keep the sheet along the bottom. */
 const isWide = () => typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches;
@@ -37,7 +57,10 @@ export function BankPanel({
   onPick,
   onClose,
   title,
+  offset = 0,
 }: {
+  /** Distance from the right edge on wide screens (from useBankPair). */
+  offset?: number;
   /** Combined exams: the chapter whose bank this is. */
   title?: string;
   entries: BankEntry[];
@@ -95,7 +118,8 @@ export function BankPanel({
 
   return (
     <aside
-      className={`bank-panel-in fixed inset-x-0 bottom-0 z-50 flex max-h-[52vh] flex-col border-t-2 border-blue-700 bg-[#fdfcf8] font-paper text-black shadow-[0_-12px_40px_rgba(0,0,0,0.45)] md:inset-x-auto md:bottom-0 md:right-0 md:top-16 md:max-h-none md:border-l md:border-t-0 md:border-black/20 md:shadow-[-14px_0_40px_rgba(0,0,0,0.5)] ${PANEL_W}`}
+      className={`bank-panel-in fixed inset-x-0 bottom-0 z-50 flex max-h-[52vh] flex-col border-t-2 border-blue-700 bg-[#fdfcf8] font-paper text-black shadow-[0_-12px_40px_rgba(0,0,0,0.45)] md:inset-x-auto md:bottom-0 md:right-0 md:top-16 md:max-h-none md:border-l md:border-t-0 md:border-black/20 md:shadow-[-14px_0_40px_rgba(0,0,0,0.5)] ${offset ? "md:border-r" : ""} ${PANEL_W}`}
+      style={offset ? { right: offset } : undefined}
       // Taps inside must not take focus from the blank (that would close or move it).
       onMouseDown={(e) => e.preventDefault()}
     >

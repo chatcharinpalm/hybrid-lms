@@ -117,6 +117,7 @@ export default function ImportExamPage() {
             prompt: q.prompt,
             points: q.type === "ESSAY" ? 0 : q.points,
             answerKey: q.answerKey.trim() || undefined,
+            explanation: q.explanation?.trim() || undefined,
             options:
               q.type === "SINGLE_CHOICE"
                 ? q.options.filter((o) => o.label.trim()).map((o) => ({ label: o.label.trim(), isCorrect: o.isCorrect }))
@@ -459,6 +460,16 @@ function QuestionEditor({
             {q.type === "ESSAY" && <p className="text-xs text-slate-500">ข้อเขียน: นักศึกษาพิมพ์คำตอบ อาจารย์อ่านในหน้าคุมสอบ (ไม่นับคะแนนอัตโนมัติ)</p>}
 
             {missing && <p className="text-xs font-medium text-amber-700">ยังไม่มีเฉลย</p>}
+
+            {q.type !== "ESSAY" && (
+              <textarea
+                value={q.explanation ?? ""}
+                rows={q.explanation ? 2 : 1}
+                placeholder="คำอธิบายเฉลย (ไม่บังคับ) — นักศึกษาเห็นหลังส่ง"
+                onChange={(e) => onChange(q.key, { explanation: e.target.value })}
+                className={`${input} resize-y text-xs ${q.explanation ? "border-amber-300 bg-amber-50" : ""}`}
+              />
+            )}
           </div>
         );
       })}

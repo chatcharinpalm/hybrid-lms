@@ -19,7 +19,10 @@ export function DocumentPaper({
   renderBelow,
   renderAside,
   questionRef,
+  className = "font-paper text-[17px] leading-relaxed text-slate-900",
 }: {
+  /** Text style of the sheet (the exam's A4 pages use the paper's own size). */
+  className?: string;
   blocks: PaperBlock[];
   /** The Option Bank as this student sees it; `used` entries are crossed out. */
   bank?: Array<{ code: string; label: string; used?: boolean }>;
@@ -31,7 +34,7 @@ export function DocumentPaper({
 }) {
   let qIndex = -1;
   return (
-    <div className="font-paper text-[17px] leading-relaxed text-slate-900">
+    <div className={className}>
       {blocks.map((block, i) => {
         if (block.t === "html") return <Html key={i} html={block.html} renderSlot={renderSlot} />;
         if (block.t === "bank") return <BankTable key={i} bank={bank ?? []} />;

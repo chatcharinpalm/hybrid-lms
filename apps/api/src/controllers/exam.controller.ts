@@ -6,6 +6,8 @@ import { prisma } from "../prisma";
 import * as examSession from "../services/examSession.service";
 import { ExamRuleError } from "../services/examSession.service";
 import * as proctorControl from "../services/proctorControl.service";
+import * as gradebook from "../services/gradebook.service";
+import { readSections, roomAllowed } from "../services/examRooms";
 import { sanitizePaperHtml, type PaperBlock } from "../services/paperDocument";
 import type { DrawRule } from "../services/draw";
 import type { Prisma } from "@prisma/client";
@@ -94,6 +96,8 @@ const importQuestionSchema = z.object({
   points: z.number().int().min(0).max(100),
   /** SHORT_ANSWER: accepted answers, "a | b". */
   answerKey: z.string().trim().max(1000).optional(),
+  /** Why the answer is right, read from the document's key; students see it when reviewing. */
+  explanation: z.string().trim().max(5000).optional(),
   options: z.array(importOptionSchema).max(200).default([]),
 });
 
@@ -204,6 +208,7 @@ export async function importDocumentExam(req: Request, res: Response) {
         points: q.points,
         order: q.order,
         answerKey: q.type === "SHORT_ANSWER" ? q.answerKey : null,
+        explanation: q.explanation || null,
       })),
     }),
     prisma.questionOption.createMany({
@@ -280,6 +285,7 @@ export async function combineExams(req: Request, res: Response) {
         points: q.points,
         order: questions.length + 1,
         answerKey: q.answerKey,
+        explanation: q.explanation,
         group: source.id,
       });
       for (const o of q.options) options.push({ questionId: id, label: o.label, code: o.code, isCorrect: o.isCorrect, order: o.order });
@@ -323,12 +329,21 @@ export async function combineExams(req: Request, res: Response) {
 export async function listExamsForCourse(req: Request, res: Response) {
   const staff = req.user?.role === "TEACHER" || req.user?.role === "ADMIN";
   const exams = await prisma.exam.findMany({
-    // A hidden course's exams are listed for staff only.
-    where: { courseId: req.params.courseId, ...(staff ? {} : { course: { isHidden: false } }) },
+    // Hidden exams, and a hidden course's exams, are listed for staff only.
+    where: { courseId: req.params.courseId, ...(staff ? {} : { isHidden: false, course: { isHidden: false } }) },
     orderBy: { createdAt: "desc" },
     include: { _count: { select: { questions: true } } },
   });
-  return res.json(exams);
+  // Students see only the exams set for their own room.
+  const mine = staff ? exams : await forMyRoom(req, exams);
+  return res.json(mine.map((e) => ({ ...e, sections: readSections(e.sections) })));
+}
+
+/** Leaves out exams set for other rooms than the signed-in student's (anonymous visitors see every room's). */
+async function forMyRoom<T extends { sections: string | null }>(req: Request, exams: T[]) {
+  if (!req.user) return exams;
+  const me = await prisma.user.findUnique({ where: { id: req.user.id }, select: { section: true } });
+  return exams.filter((e) => roomAllowed(e, me?.section));
 }
 
 export async function publishExam(req: Request, res: Response) {
@@ -487,8 +502,61 @@ export async function deleteExam(req: Request, res: Response) {
 }
 
 export async function setExamStatus(req: Request, res: Response) {
-  const { status } = z.object({ status: z.enum(["OPEN", "CLOSED"]) }).parse(req.body);
-  return control(res, () => proctorControl.setExamStatus(req.params.examId, status, actor(req)));
+  const { status, durationMinutes, sections } = z
+    .object({
+      status: z.enum(["OPEN", "CLOSED"]),
+      durationMinutes: z.number().int().min(1).max(600).optional(),
+      sections: roomsSchema,
+    })
+    .parse(req.body);
+  return control(res, () => proctorControl.setExamStatus(req.params.examId, status, actor(req), durationMinutes, sections));
+}
+
+/** The rooms that sit an exam: a list of room names, or null for every room. */
+const roomsSchema = z.array(z.string().trim().min(1).max(100)).max(50).nullable().optional();
+
+export async function getLiveSummary(req: Request, res: Response) {
+  return res.json(await proctorControl.liveSummary(actor(req)));
+}
+
+export async function getCourseSections(req: Request, res: Response) {
+  return res.json(await proctorControl.courseSections(req.params.courseId));
+}
+
+export async function updateExamSettings(req: Request, res: Response) {
+  const settings = z
+    .object({
+      isHidden: z.boolean().optional(),
+      reviewMode: z.enum(["AFTER_SUBMIT", "AFTER_CLOSE", "NEVER"]).optional(),
+      durationMinutes: z.number().int().min(1).max(600).optional(),
+      sections: roomsSchema,
+    })
+    .parse(req.body);
+  return control(res, () => proctorControl.updateExamSettings(req.params.examId, settings, actor(req)));
+}
+
+export async function getAnswerKey(req: Request, res: Response) {
+  return control(res, () => proctorControl.getAnswerKey(req.params.examId, actor(req)));
+}
+
+export async function saveExplanations(req: Request, res: Response) {
+  const { items } = z
+    .object({ items: z.array(z.object({ questionId: z.string().uuid(), explanation: z.string().max(5000) })).max(1000) })
+    .parse(req.body);
+  return control(res, () => proctorControl.saveExplanations(req.params.examId, items, actor(req)));
+}
+
+export async function getGradebook(req: Request, res: Response) {
+  return control(res, () => gradebook.getGradebook(req.params.courseId, actor(req)));
+}
+
+export async function getMyReview(req: Request, res: Response) {
+  try {
+    return res.json(await examSession.getMyReview(req.params.examId, req.user!.id));
+  } catch (err) {
+    if (err instanceof ExamRuleError) return res.status(409).json({ error: err.message });
+    throw err;
+  }
 }
 
 export async function forceSubmitAttempt(req: Request, res: Response) {

@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "../prisma";
 import { byThaiName, generateAccessCode } from "../utils/roster";
+import { programOf } from "../services/examRooms";
 
 /**
  * The class lists, one per room, ก–ฮ — with each student's access code, for
@@ -29,6 +30,29 @@ export async function getRoster(_req: Request, res: Response) {
         })),
     })),
   });
+}
+
+/** For the login page (no sign-in): the programmes students pick from, each with its rooms. */
+export async function listPrograms(_req: Request, res: Response) {
+  const rows = await prisma.user.findMany({
+    where: { role: "STUDENT", isActive: true, section: { not: null } },
+    select: { section: true },
+    distinct: ["section"],
+  });
+  const programs = new Map<string, string[]>();
+  for (const r of rows) {
+    const code = programOf(r.section);
+    if (code) programs.set(code, [...(programs.get(code) ?? []), r.section!].sort());
+  }
+  return res.json([...programs].sort(([a], [b]) => a.localeCompare(b)).map(([code, rooms]) => ({ code, rooms })));
+}
+
+export async function getMe(req: Request, res: Response) {
+  const me = await prisma.user.findUnique({
+    where: { id: req.user!.id },
+    select: { fullName: true, studentCode: true, section: true },
+  });
+  return res.json(me);
 }
 
 async function issueCode(studentId: string) {

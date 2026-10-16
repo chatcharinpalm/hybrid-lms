@@ -5,6 +5,7 @@ import { prisma } from "../prisma";
 import { signAccessToken, signRefreshToken, verifyRefreshToken } from "../utils/jwt";
 import type { Role } from "../constants";
 import { rosterEmail } from "../utils/roster";
+import { programOf } from "../services/examRooms";
 
 // Public self-registration is student-only by design — teacher/admin
 // accounts are provisioned separately (seed script or a future
@@ -23,7 +24,8 @@ const registerSchema = z.object({
 // access code handed to them after signing the attendance sheet.
 const loginSchema = z.union([
   z.object({ email: z.string().email(), password: z.string().min(1) }),
-  z.object({ studentCode: z.string().min(1), password: z.string().min(1) }),
+  // program: the programme (CED / TCT) the student picked on the login page; it must be theirs.
+  z.object({ studentCode: z.string().min(1), password: z.string().min(1), program: z.string().trim().max(20).optional() }),
 ]);
 
 /** Failed sign-ins per login key; access codes are short, so guessing is cut off. */
@@ -97,6 +99,15 @@ export async function login(req: Request, res: Response) {
   }
   failures.delete(email);
 
+  // Checked only after the code is right, so a wrong guess learns nothing about the student.
+  if (byCode && body.program && programOf(user.section) && programOf(user.section) !== body.program.toUpperCase()) {
+    const mine = programOf(user.section);
+    return res.status(403).json({
+      error: `คุณอยู่ห้อง ${user.section} (สาขา ${mine}) — กรุณากด "เปลี่ยนสาขา" แล้วเลือก ${mine}`,
+      program: mine,
+    });
+  }
+
   const accessToken = signAccessToken({ sub: user.id, role: user.role as Role, email: user.email });
   const refreshToken = signRefreshToken({ sub: user.id });
 
@@ -118,7 +129,7 @@ export async function login(req: Request, res: Response) {
   return res.json({
     accessToken,
     refreshToken,
-    user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role },
+    user: { id: user.id, email: user.email, fullName: user.fullName, role: user.role, section: user.section },
   });
 }
 

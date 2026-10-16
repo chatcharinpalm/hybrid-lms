@@ -231,7 +231,7 @@ export function StudentControls({ attemptId, status, timed, onDone }: StudentCon
             }`}
           >
             <span className="material-symbols-outlined text-sm">restart_alt</span>
-            {confirm === "reset" ? "ยืนยันลบและให้สอบใหม่?" : "รีเซ็ตให้สอบใหม่"}
+            {confirm === "reset" ? "ยืนยันให้สอบใหม่? (คะแนนเดิมเก็บในสมุดคะแนน)" : "รีเซ็ตให้สอบใหม่"}
           </button>
         </div>
         {confirm && (
@@ -379,7 +379,7 @@ export function TileActions({
       )}
       <button
         type="button"
-        title="ลบผลและให้สอบใหม่ (กดสองครั้ง)"
+        title="ให้สอบใหม่ — คะแนนรอบนี้เก็บไว้ในสมุดคะแนน (กดสองครั้ง)"
         disabled={busy}
         onClick={stop(() => (confirm === "reset" ? run("reset", {}, "รีเซ็ตแล้ว ผู้สอบเริ่มใหม่ได้") : setConfirm("reset")))}
         className={`${icon} ${
@@ -513,7 +513,7 @@ export function RowActions({ attemptId, status, timed, onDone }: StudentControls
         }`}
       >
         <span className="material-symbols-outlined text-sm">restart_alt</span>
-        {confirm === "reset" ? "ยืนยันลบ?" : "สอบใหม่"}
+        {confirm === "reset" ? "ยืนยัน?" : "สอบใหม่"}
       </button>
       {error && <span className="w-full text-right text-[10px] text-error">{error}</span>}
     </div>

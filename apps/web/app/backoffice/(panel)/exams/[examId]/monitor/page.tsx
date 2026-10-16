@@ -7,6 +7,7 @@ import { apiFetch } from "@/lib/api";
 import { BroadcastButton, RowActions, StudentControls } from "@/components/backoffice/StudentControls";
 import { StudentWall } from "@/components/backoffice/StudentWall";
 import { AnswerSheet } from "@/components/backoffice/AnswerSheet";
+import { OpenRoomDialog } from "@/components/backoffice/OpenRoomDialog";
 import { AUDIT_ACTION_TH, ENDED_REASON_TH, VIOLATION_TRANSLATION, exportExamExcel } from "@/lib/exportExamExcel";
 
 interface ProctorStudent {
@@ -51,6 +52,9 @@ interface ProctorData {
     timePerQuestionSeconds: number | null;
     maxViolations: number;
     status: string;
+    courseId: string;
+    /** Rooms that sit it; null = every room. */
+    sections: string[] | null;
   };
   students: ProctorStudent[];
   recentViolations: Array<{
@@ -95,6 +99,14 @@ export default function LiveProctorPage() {
   const [notice, setNotice] = useState<string | null>(null);
   const [confirmStatus, setConfirmStatus] = useState(false);
   const [statusBusy, setStatusBusy] = useState(false);
+  // Opening asks for the minutes first.
+  const [askMinutes, setAskMinutes] = useState(false);
+  // Every room on the course's class list, for choosing which rooms sit the exam.
+  const [courseRooms, setCourseRooms] = useState<string[]>([]);
+  const courseIdForRooms = data?.exam.courseId;
+  useEffect(() => {
+    if (courseIdForRooms) apiFetch<string[]>(`/api/exams/rooms/${courseIdForRooms}`).then(setCourseRooms).catch(() => undefined);
+  }, [courseIdForRooms]);
   const [view, setView] = useState<"wall" | "table">("wall");
   const [cheatersFirst, setCheatersFirst] = useState(false);
   const [room, setRoom] = useState<string>("ALL");
@@ -177,15 +189,21 @@ export default function LiveProctorPage() {
     fetchData();
   };
 
-  const toggleExamStatus = async (next: "OPEN" | "CLOSED") => {
+  const toggleExamStatus = async (next: "OPEN" | "CLOSED", durationMinutes?: number, sections?: string[] | null) => {
     setStatusBusy(true);
     try {
       const r = await apiFetch<{ submitted: number }>(`/api/exams/${examId}/status`, {
         method: "POST",
-        body: JSON.stringify({ status: next }),
+        body: JSON.stringify({ status: next, durationMinutes, sections }),
       });
       setConfirmStatus(false);
-      showNotice(next === "OPEN" ? "เปิดห้องสอบแล้ว" : `ปิดห้องสอบแล้ว (ส่งข้อสอบอัตโนมัติ ${r.submitted} คน)`);
+      setAskMinutes(false);
+      setRoom("ALL");
+      showNotice(
+        next === "OPEN"
+          ? `เปิดห้องสอบแล้ว (${sections?.length ? sections.join(", ") : "ทุกห้อง"} · ${durationMinutes} นาที)`
+          : `ปิดห้องสอบแล้ว (ส่งข้อสอบอัตโนมัติ ${r.submitted} คน)`
+      );
     } catch (err) {
       setNotice(err instanceof Error ? err.message : "ทำรายการไม่สำเร็จ");
     } finally {
@@ -283,12 +301,23 @@ export default function LiveProctorPage() {
         <button
           type="button"
           disabled={statusBusy}
-          onClick={() => toggleExamStatus("OPEN")}
+          onClick={() => setAskMinutes(true)}
           className="px-3 py-2 rounded-xl text-xs font-bold border flex items-center gap-1.5 bg-secondary/15 text-secondary border-secondary/40 hover:bg-secondary/25 disabled:opacity-50"
         >
           <span className="material-symbols-outlined text-sm">lock_open</span>
           เปิดห้องสอบ
         </button>
+      )}
+      {askMinutes && (
+        <OpenRoomDialog
+          examTitle={data.exam.title}
+          currentMinutes={data.exam.durationMinutes}
+          rooms={courseRooms}
+          currentRooms={data.exam.sections}
+          busy={statusBusy}
+          onCancel={() => setAskMinutes(false)}
+          onOpen={(m, sections) => toggleExamStatus("OPEN", m, sections)}
+        />
       )}
     </>
   );
@@ -387,6 +416,18 @@ export default function LiveProctorPage() {
     >
       {isFullscreen && (
         <div className="flex flex-wrap items-center gap-3">
+          <button
+            type="button"
+            onClick={() => {
+              document.exitFullscreen().catch(() => undefined);
+              router.push("/backoffice/monitor");
+            }}
+            title="กลับไปรายการข้อสอบ"
+            className="flex items-center gap-1 rounded-lg border border-outline-variant/40 bg-surface-container px-2.5 py-1 text-xs font-semibold text-on-surface-variant hover:text-on-surface"
+          >
+            <span className="material-symbols-outlined text-base">arrow_back</span>
+            กลับ
+          </button>
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-primary/10 text-primary border border-primary/30">
             <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
             LIVE
@@ -414,13 +455,21 @@ export default function LiveProctorPage() {
       {/* Top Header */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-outline-variant/30 pb-4">
         <div>
+          <Link
+            href="/backoffice/monitor"
+            className="mb-2 inline-flex items-center gap-1 rounded-lg border border-outline-variant/40 bg-surface-container px-3 py-1.5 text-xs font-semibold text-on-surface-variant hover:text-on-surface"
+          >
+            <span className="material-symbols-outlined text-base">arrow_back</span>
+            กลับไปรายการข้อสอบ
+          </Link>
           <div className="flex items-center gap-2">
             <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold bg-primary/10 text-primary border border-primary/30">
               <span className="w-2 h-2 rounded-full bg-primary animate-pulse" />
               LIVE PROCTORING
             </span>
-            <span className="text-xs font-mono text-outline">
-              XAMPP MySQL: hybrid_lms
+            <span className="text-xs text-outline">
+              เวลาสอบ {data.exam.durationMinutes} นาที · ห้องที่สอบ:{" "}
+              <b className="text-primary">{data.exam.sections?.length ? data.exam.sections.join(", ") : "ทุกห้อง"}</b>
             </span>
           </div>
           <h1 className="text-xl font-bold text-on-surface mt-1">

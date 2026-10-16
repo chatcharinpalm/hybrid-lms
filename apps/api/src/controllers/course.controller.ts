@@ -3,6 +3,7 @@ import type { Request, Response } from "express";
 import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "../prisma";
+import { roomAllowed } from "../services/examRooms";
 
 /** Public course card for the login page: course info plus the instructor's display name and photo. */
 export async function getCourseInstructor(req: Request, res: Response) {
@@ -35,14 +36,17 @@ export async function listCourses(req: Request, res: Response) {
     where,
     orderBy: { createdAt: "asc" },
     // Exam statuses feed the course cards (how many exams, how many rooms open now).
-    include: { exams: { select: { status: true } } },
+    include: { exams: { select: { status: true, isHidden: true, sections: true } } },
   });
+  // Students don't count exams hidden from them or set for other rooms.
+  const staff = req.user?.role === "TEACHER" || req.user?.role === "ADMIN";
+  const mySection =
+    req.user && !staff ? (await prisma.user.findUnique({ where: { id: req.user.id }, select: { section: true } }))?.section : undefined;
   return res.json(
-    courses.map(({ exams, ...c }) => ({
-      ...c,
-      examCount: exams.length,
-      openExamCount: exams.filter((e) => e.status === "OPEN").length,
-    }))
+    courses.map(({ exams, ...c }) => {
+      const visible = staff ? exams : exams.filter((e) => !e.isHidden && (!req.user || roomAllowed(e, mySection)));
+      return { ...c, examCount: visible.length, openExamCount: visible.filter((e) => e.status === "OPEN").length };
+    })
   );
 }
 

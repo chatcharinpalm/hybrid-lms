@@ -176,6 +176,14 @@ model Exam {
   // draws from each group, JSON [{ group, label, count }] (see services/draw.ts).
   // Null = every question of the exam.
   drawJson String? @db.Text
+  // Hidden from students (not listed, cannot be started); staff still see it.
+  isHidden Boolean @default(false)
+  // When a student may see their marked paper (right/wrong, the right answer, the teacher's
+  // explanation): AFTER_SUBMIT | AFTER_CLOSE (once the room is closed) | NEVER.
+  reviewMode String @default("AFTER_SUBMIT")
+  // The rooms (User.section) that sit this exam, JSON string[]; null = every room on the class list.
+  // Students of other rooms don't see it and can't start it; the monitor shows only these rooms.
+  sections String? @db.Text
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -199,6 +207,8 @@ model Question {
   // Combined exams: the group (source exam) this question was copied from; its
   // Option Bank and the per-student draw go by group. Null on ordinary exams.
   group     String? @db.VarChar(64)
+  // The teacher's explanation of the answer, shown to students when they review their paper.
+  explanation String? @db.Text
 
   exam    Exam             @relation(fields: [examId], references: [id], onDelete: Cascade)
   options QuestionOption[]
@@ -250,6 +260,9 @@ model ExamAttempt {
 
   // Why the attempt ended: STUDENT | TIMEOUT | VIOLATIONS | ADMIN_FORCED | EXAM_CLOSED
   endedReason String?
+  // Set when a proctor resets the attempt: it stays on record (the gradebook shows it)
+  // but no longer counts, and the student may start again.
+  archivedAt DateTime?
 
   @@index([examId, studentId])
 }

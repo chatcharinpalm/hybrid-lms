@@ -1,9 +1,9 @@
-/** Looks for course cards, so each course reads as its own subject at a glance. */
+/** Looks for course cards, so each course reads as its own subject at a glance — all in the dusk-sky palette. */
 const COVERS = [
-  { from: "#1e3a8a", to: "#0ea5e9", glow: "#7dd3fc" },
-  { from: "#4c1d95", to: "#db2777", glow: "#f9a8d4" },
-  { from: "#064e3b", to: "#10b981", glow: "#6ee7b7" },
-  { from: "#7c2d12", to: "#f59e0b", glow: "#fcd34d" },
+  { from: "#7a1838", to: "#f0661f", glow: "#ffd27a" },
+  { from: "#2c0c35", to: "#c0306a", glow: "#ff9ac0" },
+  { from: "#4a1030", to: "#e8a13a", glow: "#ffe08a" },
+  { from: "#12071f", to: "#8a2be2", glow: "#d7a6ff" },
 ];
 
 export function courseCover(index: number, title: string) {

@@ -3,9 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { getStoredFullName, logout } from "@/lib/auth";
+import { BrandMark } from "@/components/brand/BrandMark";
 
 const NAV_ITEMS = [
   { href: "/backoffice/monitor", label: "คุมสอบ", icon: "live_tv" },
+  { href: "/backoffice/gradebook", label: "สมุดคะแนน", icon: "grading" },
   { href: "/backoffice/students", label: "รายชื่อ & รหัสเข้าสอบ", icon: "badge" },
   { href: "/backoffice/courses", label: "รายวิชา & การแสดงผล", icon: "visibility" },
   { href: "/backoffice/exams/import", label: "นำเข้าข้อสอบ (Word/PDF)", icon: "upload" },
@@ -32,13 +34,7 @@ export function AdminShell({ children }: { children: React.ReactNode }) {
       <aside className="fixed left-0 top-0 h-full w-60 bg-surface-container-low border-r border-tertiary/20 z-50 flex flex-col justify-between">
         <div>
           <div className="h-16 px-5 flex items-center gap-3 border-b border-tertiary/20 bg-surface-container-lowest/70">
-            <div className="w-8 h-8 rounded bg-tertiary/15 border border-tertiary/40 flex items-center justify-center text-tertiary shrink-0">
-              <span className="material-symbols-outlined text-lg">admin_panel_settings</span>
-            </div>
-            <div className="flex flex-col min-w-0">
-              <span className="text-sm font-semibold tracking-tight text-on-surface truncate">Admin Panel</span>
-              <span className="text-[11px] font-mono text-tertiary uppercase tracking-wider">NetSec Hub</span>
-            </div>
+            <BrandMark sub="ระบบหลังบ้าน · คุมสอบ" />
           </div>
 
           <nav className="flex flex-col gap-1 px-3 py-4">

@@ -23,6 +23,8 @@ examRouter.post(
 // Student: taking the exam (Secure Exam Engine)
 examRouter.post("/:examId/attempts", requireAuth, requireRole("STUDENT"), examController.startAttempt);
 examRouter.get("/:examId/my-result", requireAuth, requireRole("STUDENT"), examController.getMyLatestResult);
+// The student's marked paper (wrong answers, the key, explanations), as the exam's review setting allows.
+examRouter.get("/:examId/my-review", requireAuth, requireRole("STUDENT"), examController.getMyReview);
 examRouter.post(
   "/attempts/:attemptId/answers",
   requireAuth,
@@ -78,6 +80,13 @@ examRouter.get(
 // Teacher/Admin: back-office controls
 const staff = [requireAuth, requireRole("TEACHER", "ADMIN")];
 examRouter.post("/:examId/status", ...staff, examController.setExamStatus);
+examRouter.patch("/:examId/settings", ...staff, examController.updateExamSettings);
+examRouter.get("/:examId/answer-key", ...staff, examController.getAnswerKey);
+examRouter.put("/:examId/explanations", ...staff, examController.saveExplanations);
+examRouter.get("/gradebook/:courseId", ...staff, examController.getGradebook);
+examRouter.get("/rooms/:courseId", ...staff, examController.getCourseSections);
+// What is open right now, room by room (the back office's front page).
+examRouter.get("/live/summary", ...staff, examController.getLiveSummary);
 examRouter.delete("/:examId", ...staff, examController.deleteExam);
 examRouter.get("/:examId/audit", ...staff, examController.getExamAuditLog);
 examRouter.post("/attempts/:attemptId/control/force-submit", ...staff, examController.forceSubmitAttempt);

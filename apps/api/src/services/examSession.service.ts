@@ -4,6 +4,7 @@ import { byThaiName } from "../utils/roster";
 import { generateRandomSeed, seededShuffle } from "../utils/shuffle";
 import { dealBlocks, fixedOptionIds, readPaper, slotOrder } from "./paperDocument";
 import { drawnCount, drawQuestions, readDraw } from "./draw";
+import { readSections, roomAllowed } from "./examRooms";
 
 export class ExamRuleError extends Error {}
 
@@ -171,28 +172,34 @@ function dealPaper(exam: DealtExam, seed: string) {
   return { questions, document };
 }
 
+const answerSheetInclude = {
+  answers: true,
+  student: { select: { fullName: true, studentCode: true, section: true } },
+  exam: {
+    include: {
+      questions: {
+        include: { options: { orderBy: [{ order: "asc" as const }, { id: "asc" as const }] } },
+        orderBy: [{ order: "asc" as const }, { id: "asc" as const }],
+      },
+    },
+  },
+};
+
 /**
  * For staff: one attempt's answers, question by question in the order the
  * student saw them, with the code they wrote, its words, and the right answer.
  */
 export async function getAttemptAnswerSheet(attemptId: string) {
-  const attempt = await prisma.examAttempt.findUnique({
-    where: { id: attemptId },
-    include: {
-      answers: true,
-      student: { select: { fullName: true, studentCode: true, section: true } },
-      exam: {
-        include: {
-          questions: {
-            include: { options: { orderBy: [{ order: "asc" }, { id: "asc" }] } },
-            orderBy: [{ order: "asc" }, { id: "asc" }],
-          },
-        },
-      },
-    },
-  });
+  const attempt = await prisma.examAttempt.findUnique({ where: { id: attemptId }, include: answerSheetInclude });
   if (!attempt) throw new ExamRuleError("Attempt not found");
+  return markedSheet(attempt);
+}
 
+type SheetAttempt = NonNullable<Awaited<ReturnType<typeof loadSheetAttempt>>>;
+const loadSheetAttempt = (id: string) => prisma.examAttempt.findUnique({ where: { id }, include: answerSheetInclude });
+
+/** An attempt's paper as marked: each question as dealt to the student, their answer, the key and the explanation. */
+function markedSheet(attempt: SheetAttempt) {
   const rows = dealPaper(attempt.exam, attempt.randomSeed).questions.map((q, i) => {
     const answer = attempt.answers.find((a) => a.questionId === q.id);
     const source = attempt.exam.questions.find((x) => x.id === q.id);
@@ -201,6 +208,7 @@ export async function getAttemptAnswerSheet(attemptId: string) {
       // Number of the question on the teacher's paper.
       paperNumber: source?.order ?? null,
       prompt: q.prompt,
+      explanation: source?.explanation ?? null,
     };
     // Written answers: the words themselves (essays have no key; they are marked by the teacher).
     if (q.type === "SHORT_ANSWER" || q.type === "ESSAY") {
@@ -234,6 +242,34 @@ export async function getAttemptAnswerSheet(attemptId: string) {
   };
 }
 
+/** Why a student can't see their marked paper yet, or null when they can. */
+function reviewBlocked(exam: { reviewMode: string; status: string }) {
+  if (exam.reviewMode === "NEVER") return "อาจารย์ไม่ได้เปิดให้ดูเฉลยของแบบทดสอบนี้";
+  if (exam.reviewMode === "AFTER_CLOSE" && exam.status === "OPEN") return "เฉลยจะแสดงหลังผู้คุมสอบปิดห้องสอบ";
+  return null;
+}
+
+/**
+ * For the student, after handing in: their latest counted paper as marked —
+ * which questions were wrong, the right answer and the teacher's explanation —
+ * when the exam's review setting allows it.
+ */
+export async function getMyReview(examId: string, studentId: string) {
+  const exam = await prisma.exam.findUnique({ where: { id: examId }, select: { reviewMode: true, status: true } });
+  if (!exam) throw new ExamRuleError("Exam not found");
+  const blocked = reviewBlocked(exam);
+  if (blocked) throw new ExamRuleError(blocked);
+  const latest = await prisma.examAttempt.findFirst({
+    where: { examId, studentId, archivedAt: null, status: { not: "IN_PROGRESS" } },
+    orderBy: { startedAt: "desc" },
+    select: { id: true },
+  });
+  if (!latest) throw new ExamRuleError("ยังไม่มีผลสอบ");
+  const attempt = await loadSheetAttempt(latest.id);
+  const sheet = markedSheet(attempt!);
+  return { examTitle: sheet.examTitle, scorePoints: sheet.scorePoints, total: sheet.total, rows: sheet.rows };
+}
+
 /**
  * Starts (or resumes) an attempt and returns the exam paper with question
  * and option order shuffled per-student using the attempt's random seed.
@@ -255,6 +291,11 @@ export async function startOrResumeAttempt(examId: string, studentId: string) {
   // Only students on the course's class list sit its exams (no self-registered walk-ins).
   const enrolled = await prisma.enrollment.count({ where: { courseId: exam.courseId, studentId, status: "ACTIVE" } });
   if (!enrolled) throw new ExamRuleError("คุณไม่มีรายชื่อในรายวิชานี้ กรุณาติดต่ออาจารย์ผู้คุมสอบ");
+  if (exam.isHidden) throw new ExamRuleError("แบบทดสอบนี้ถูกซ่อนอยู่ กรุณาติดต่ออาจารย์ผู้คุมสอบ");
+  const me = await prisma.user.findUnique({ where: { id: studentId }, select: { section: true } });
+  if (!roomAllowed(exam, me?.section)) {
+    throw new ExamRuleError(`แบบทดสอบนี้ไม่ได้เปิดให้ห้อง ${me?.section ?? "ของคุณ"} กรุณาติดต่ออาจารย์ผู้คุมสอบ`);
+  }
   if (exam.status !== "OPEN") throw new ExamRuleError("ห้องสอบยังไม่เปิด กรุณารอผู้คุมสอบเปิดห้อง");
 
   const now = new Date();
@@ -262,12 +303,12 @@ export async function startOrResumeAttempt(examId: string, studentId: string) {
   if (exam.closesAt && now > exam.closesAt) throw new ExamRuleError("Exam has closed");
 
   let attempt = await prisma.examAttempt.findFirst({
-    where: { examId, studentId, status: "IN_PROGRESS" },
+    where: { examId, studentId, status: "IN_PROGRESS", archivedAt: null },
   });
 
   if (!attempt) {
-    // maxAttempts <= 0 means unlimited retakes.
-    const attemptCount = await prisma.examAttempt.count({ where: { examId, studentId } });
+    // maxAttempts <= 0 means unlimited retakes. Reset (archived) attempts don't count.
+    const attemptCount = await prisma.examAttempt.count({ where: { examId, studentId, archivedAt: null } });
     if (exam.maxAttempts > 0 && attemptCount >= exam.maxAttempts) {
       throw new ExamRuleError("No attempts remaining for this exam");
     }
@@ -533,6 +574,7 @@ function matchesKey(answer: string, key: string | null | undefined): boolean {
 async function requireOwnedInProgressAttempt(attemptId: string, studentId: string) {
   const attempt = await prisma.examAttempt.findUnique({ where: { id: attemptId } });
   if (!attempt || attempt.studentId !== studentId) throw new ExamRuleError("Attempt not found");
+  if (attempt.archivedAt) throw new ExamRuleError("การสอบของคุณถูกรีเซ็ตโดยผู้คุมสอบ");
   if (attempt.status !== "IN_PROGRESS") throw new ExamRuleError("Attempt is no longer in progress");
   return attempt;
 }
@@ -590,12 +632,12 @@ export async function updateProgress(attemptId: string, studentId: string, reque
 /**
  * Polled by the student's exam screen so back-office actions take effect
  * within a few seconds: forced submission, added time, and warning messages.
- * Messages are marked seen once delivered. A reset (deleted) attempt surfaces
+ * Messages are marked seen once delivered. A reset (archived) attempt surfaces
  * as ExamRuleError("ATTEMPT_RESET").
  */
 export async function getLiveState(attemptId: string, studentId: string) {
   let attempt = await prisma.examAttempt.findUnique({ where: { id: attemptId } });
-  if (!attempt || attempt.studentId !== studentId) throw new ExamRuleError("ATTEMPT_RESET");
+  if (!attempt || attempt.studentId !== studentId || attempt.archivedAt) throw new ExamRuleError("ATTEMPT_RESET");
   const exam = await prisma.exam.findUniqueOrThrow({ where: { id: attempt.examId } });
 
   if (attempt.status === "IN_PROGRESS") {
@@ -632,15 +674,23 @@ export async function getMyLatestResult(examId: string, studentId: string) {
   const exam = await prisma.exam.findUnique({
     where: { id: examId },
     // Essays are marked by the teacher, so the automatic score is out of the other questions.
-    select: { id: true, title: true, maxAttempts: true, status: true, drawJson: true, _count: { select: { questions: { where: { type: { not: "ESSAY" } } } } } },
+    select: {
+      id: true,
+      title: true,
+      maxAttempts: true,
+      status: true,
+      drawJson: true,
+      reviewMode: true,
+      _count: { select: { questions: { where: { type: { not: "ESSAY" } } } } },
+    },
   });
   if (!exam) throw new ExamRuleError("Exam not found");
   const [latest, attemptCount] = await Promise.all([
     prisma.examAttempt.findFirst({
-      where: { examId, studentId, status: { not: "IN_PROGRESS" } },
+      where: { examId, studentId, archivedAt: null, status: { not: "IN_PROGRESS" } },
       orderBy: { startedAt: "desc" },
     }),
-    prisma.examAttempt.count({ where: { examId, studentId } }),
+    prisma.examAttempt.count({ where: { examId, studentId, archivedAt: null } }),
   ]);
   // Combined exams: out of the questions this student's attempt drew.
   const totalQuestions =
@@ -652,6 +702,8 @@ export async function getMyLatestResult(examId: string, studentId: string) {
     totalQuestions,
     canRetake: exam.status === "OPEN" && (exam.maxAttempts <= 0 || attemptCount < exam.maxAttempts),
     attemptCount,
+    /** Null when the marked paper can be shown; otherwise why not (yet). */
+    reviewBlocked: reviewBlocked(exam),
     latest: latest && {
       status: latest.status,
       endedReason: latest.endedReason,
@@ -705,11 +757,14 @@ export async function getLiveProctoringData(examId: string) {
     select: { student: { select: studentSelect } },
   });
   const sectionRank = (s: string | null) => (s ? s : "￿");
+  // Only the rooms assigned to this exam (all rooms when none are set).
   const studentsList = (
     enrolledStudents.length > 0
       ? enrolledStudents.map((e) => e.student)
       : await prisma.user.findMany({ where: { role: "STUDENT" }, select: studentSelect })
-  ).sort((a, b) => sectionRank(a.section).localeCompare(sectionRank(b.section)) || byThaiName(a, b));
+  )
+    .filter((s) => roomAllowed(exam, s.section))
+    .sort((a, b) => sectionRank(a.section).localeCompare(sectionRank(b.section)) || byThaiName(a, b));
   const seatInSection = new Map<string, number>();
   const perSection = new Map<string, number>();
   for (const s of studentsList) {
@@ -720,13 +775,13 @@ export async function getLiveProctoringData(examId: string) {
 
   // Close out attempts whose time ran out while nobody had the exam open
   // (e.g. the student closed the browser), so the monitor doesn't show them running forever.
-  const running = await prisma.examAttempt.findMany({ where: { examId, status: "IN_PROGRESS" } });
+  const running = await prisma.examAttempt.findMany({ where: { examId, status: "IN_PROGRESS", archivedAt: null } });
   for (const a of running) await applyQuestionTimeout(a, exam, totalQuestions);
 
-  // Get all attempts for this exam
+  // The attempts that count (reset ones are kept for the gradebook only).
   // Oldest first, so the Map below keeps each student's latest attempt.
   const attempts = await prisma.examAttempt.findMany({
-    where: { examId },
+    where: { examId, archivedAt: null },
     orderBy: { startedAt: "asc" },
     include: {
       answers: {
@@ -827,6 +882,10 @@ export async function getLiveProctoringData(examId: string) {
       durationMinutes: exam.durationMinutes,
       maxViolations: exam.maxViolations,
       status: exam.status,
+      isHidden: exam.isHidden,
+      reviewMode: exam.reviewMode,
+      sections: readSections(exam.sections),
+      courseId: exam.courseId,
     },
     students: studentData,
     recentViolations: recentViolations.slice(0, 50),

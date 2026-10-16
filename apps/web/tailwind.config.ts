@@ -1,37 +1,36 @@
 import type { Config } from "tailwindcss";
 
-// Color tokens lifted from the provided Stitch design template
-// (stitch_network_security_learning_platform) so the app matches
-// the approved visual design out of the box.
+// "Sunset dusk": the login page's game-style sky (violet night → crimson →
+// ember orange → gold) carried into every page after sign-in.
 const config: Config = {
   darkMode: "class",
   content: ["./app/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {
-        surface: "#0b1326",
-        "surface-dim": "#0b1326",
-        "surface-bright": "#31394d",
-        "surface-container-lowest": "#060e20",
-        "surface-container-low": "#131b2e",
-        "surface-container": "#171f33",
-        "surface-container-high": "#222a3d",
-        "surface-container-highest": "#2d3449",
-        "surface-variant": "#2d3449",
-        "on-surface": "#dae2fd",
-        "on-surface-variant": "#c2c6d6",
-        outline: "#8c909f",
-        "outline-variant": "#424754",
-        primary: "#adc6ff",
-        "primary-container": "#4d8eff",
-        "on-primary": "#002e6a",
-        "on-primary-container": "#00285d",
-        secondary: "#4edea3",
-        "secondary-container": "#00a572",
+        surface: "#150d16",
+        "surface-dim": "#150d16",
+        "surface-bright": "#3d2b3b",
+        "surface-container-lowest": "#0e080f",
+        "surface-container-low": "#1c121d",
+        "surface-container": "#231725",
+        "surface-container-high": "#2e1f2f",
+        "surface-container-highest": "#3a283a",
+        "surface-variant": "#3a283a",
+        "on-surface": "#fbe9e4",
+        "on-surface-variant": "#dcc4c4",
+        outline: "#a68b90",
+        "outline-variant": "#553d4a",
+        primary: "#ffb37a",
+        "primary-container": "#f0661f",
+        "on-primary": "#4d1a00",
+        "on-primary-container": "#2e0e00",
+        secondary: "#5fe0a5",
+        "secondary-container": "#1b9e66",
         "on-secondary": "#003824",
         "on-secondary-container": "#00311f",
-        tertiary: "#ffb95f",
-        "tertiary-container": "#ca8100",
+        tertiary: "#ffd36b",
+        "tertiary-container": "#d29a1a",
         "on-tertiary": "#472a00",
         "on-tertiary-container": "#3e2400",
         error: "#ffb4ab",
@@ -48,6 +47,8 @@ const config: Config = {
         // old-fashioned). Not a locally installed font: browsers place some fonts' Thai
         // vowels and tone marks wrongly.
         paper: ["IBM Plex Sans Thai Looped", "IBM Plex Sans Thai", "sans-serif"],
+        // Game-title lettering on the login page.
+        display: ["Kanit", "IBM Plex Sans Thai", "sans-serif"],
       },
     },
   },

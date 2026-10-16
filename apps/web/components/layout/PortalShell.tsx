@@ -5,6 +5,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { isLoggedIn, loginUrl } from "@/lib/auth";
 import { usePortalSettings } from "@/lib/portalSettings";
 import { TopNav } from "./TopNav";
+import { SunsetScene } from "@/components/login/SunsetScene";
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const settings = usePortalSettings();
@@ -30,9 +31,10 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   if (!signedIn) return null;
 
   return (
-    <div>
+    <div className="relative min-h-screen">
+      <SunsetScene dim />
       <TopNav hiddenMenus={hiddenMenus} />
-      <main className="w-full px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-8 max-w-7xl mx-auto">
+      <main className="relative w-full px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-8 max-w-7xl mx-auto">
         {onHiddenPage ? null : children}
       </main>
     </div>

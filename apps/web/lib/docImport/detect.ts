@@ -34,6 +34,8 @@ export interface DraftQuestion {
   bankAnswer: string | null;
   /** SHORT_ANSWER: accepted answers "a | b"; ESSAY: a guide for the teacher. */
   answerKey: string;
+  /** Why the answer is right, from the key ("ตอบ ค. 48 บิต (MAC Address มีขนาด 48 บิต)"); shown to students in review. */
+  explanation?: string;
 }
 
 /** Slots name DraftQuestion keys until the server swaps in Question ids. */
@@ -92,8 +94,12 @@ function compareCodes(a: string, b: string) {
   return x.num - y.num;
 }
 
+/** A whole bank entry in one cell: "A. ฟลิปฟลอป (Flip-flop)", "AB) …", "[A01] …". */
+const CODE_CELL = /^(\[\s*(?:code\s*\d{1,3}|[A-Z]{1,3}\d{0,3})\s*\]|[A-Z]{1,3}\d{0,3}\s*[.):])\s*(\S.*)$/;
+
 function bankPairs(t: TableUnit) {
   const pairs: Array<{ code: string; label: string }> = [];
+  // Code and text in neighbouring cells.
   for (const row of t.rows) {
     const cells = row.filter((c) => !c.hidden);
     for (let c = 0; c + 1 < cells.length; c += 2) {
@@ -102,12 +108,21 @@ function bankPairs(t: TableUnit) {
       if (code && label && CODE_RE.test(code)) pairs.push({ code: canonicalCode(code), label });
     }
   }
+  if (pairs.length > 0) return pairs;
+  // Code and text in the same cell.
+  for (const row of t.rows) {
+    for (const cell of row) {
+      const m = !cell.hidden && cell.text.match(CODE_CELL);
+      if (m) pairs.push({ code: canonicalCode(m[1].replace(/[.):]$/, "")), label: m[2].trim() });
+    }
+  }
   return pairs;
 }
 
 /** "ก. aaa  ข. bbb" → choices, when the line starts with the next expected marker. */
 function parseChoices(text: string, have: number, marker: Marker | undefined) {
-  const re = /(?:^|\s)(?:\(([ก-ฮa-jA-J1-9])\)|([ก-ฮa-jA-J])\s*[.)]|([1-9])\))\s*/g;
+  // Lookbehind, so a "2)" ending one choice ("Data Link Layer (Layer 2) ข. …") doesn't swallow the space before the next marker.
+  const re = /(?<=^|\s)(?:\(([ก-ฮa-jA-J1-9])\)|([ก-ฮa-jA-J])\s*[.)]|([1-9])\))\s*/g;
   const found: Array<{ ch: string; at: number; end: number }> = [];
   for (const m of text.matchAll(re)) {
     found.push({ ch: m[1] ?? m[2] ?? m[3], at: m.index!, end: m.index! + m[0].length });
@@ -122,6 +137,36 @@ function parseChoices(text: string, have: number, marker: Marker | undefined) {
   const labels = chain.map((c, i) => text.slice(c.end, chain[i + 1]?.at ?? text.length).trim());
   if (labels.some((l) => !l)) return null;
   return { kind, labels };
+}
+
+/**
+ * The reason given after a choice answer in the key: "ค. 48 บิต (MAC Address มีขนาด 48 บิต)",
+ * "ข. HttpOnly — ป้องกัน XSS อ่าน Cookie". The choice's own words (even with brackets,
+ * "Data Link Layer (Layer 2)") are not a reason; what follows them is.
+ */
+function rationale(answer: string, label: string): string | null {
+  let rest = answer.replace(/^\(?[ก-ฮa-jA-J1-9]\)?[.)]?\s*/, "").trim();
+  const squash = (s: string) => s.replace(/\s+/g, "").toLowerCase();
+  // Drop the choice's words from the front, matched ignoring spaces ("Http Only" = "HttpOnly").
+  const target = squash(label);
+  let i = 0;
+  let taken = 0;
+  while (i < rest.length && taken < target.length) {
+    if (!/\s/.test(rest[i])) {
+      if (rest[i].toLowerCase() !== target[taken]) break;
+      taken++;
+    }
+    i++;
+  }
+  if (taken === target.length) rest = rest.slice(i).trim();
+  else {
+    // Words differ from the choice: the reason is the last bracketed part, if any.
+    const last = rest.match(/\(([^()]*(?:\([^()]*\)[^()]*)*)\)\s*$/);
+    return last && last.index! > 0 ? last[1].trim() || null : null;
+  }
+  rest = rest.replace(/^[-–—:：,]\s*/, "").trim();
+  const wrapped = rest.match(/^\((.*)\)$/s);
+  return (wrapped ? wrapped[1] : rest).trim() || null;
 }
 
 /** Most of the paragraph highlighted, coloured or bold: a teacher's answer mark. */
@@ -244,12 +289,18 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
           }
           lastNum = qnum;
           const raw = rawText(u.runs);
-          const rawMatch = u.label ? null : raw.match(Q_RAW) ?? raw.match(/^\s*\d{1,3}\s+/);
+          // The paper's own number is cut (students see their shuffled number instead) — also when a
+          // picture comes first in the paragraph ("[picture] 57. จากภาพ…"); the picture stays.
+          const lead = u.label ? 0 : raw.match(/^[\s￼]*/)![0].length;
+          const leadImg = raw.slice(0, lead).includes("￼");
+          const rest = raw.slice(lead);
+          const rawMatch = u.label ? null : rest.match(Q_RAW) ?? rest.match(/^\s*\d{1,3}\s+/);
+          const cutStart = leadImg ? lead : 0;
           current = {
             num: String(qnum),
             run,
             tf: runTf || TF_HINT.test(partText),
-            parts: [{ unit: u, cuts: rawMatch ? [{ start: 0, end: rawMatch[0].length }] : [] }],
+            parts: [{ unit: u, cuts: rawMatch ? [{ start: cutStart, end: lead + rawMatch[0].length }] : [] }],
             choices: [],
             answer: null,
           };
@@ -416,14 +467,19 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
   for (const u of keyUnits) {
     if (u.kind === "p") {
       if (!u.text) continue;
-      // Lookbehind, so one entry's trailing space doesn't hide the next entry's number.
-      const re = /(?<=^|\s)(?:ข้อ(?:ที่)?\s*)?(\d{1,3})\s*[.):](?!\d)\s*|(?<=^|\s)ข้อ(?:ที่)?\s*(\d{1,3})\s+/g;
-      const hits = [...u.text.matchAll(re)];
-      if (!hits.length) {
-        const plain = u.text.match(/^(?:ตอบ|คำตอบ)\s*[:：]?\s*(.+)$/);
-        if (plain) keyEntries.push({ num: null, answer: plain[1].trim() });
+      // "ตอบ ก. Data Link Layer (Layer 2) (…)": a line starting with ตอบ and then an answer (not a
+      // question number) is one unnumbered entry, whatever numbers its words hold.
+      const plain = u.text.match(/^(?:ตอบ|คำตอบ)\s*[:：]?\s*(?!\d{1,3}\s*[.):])(.+)$/);
+      if (plain) {
+        keyEntries.push({ num: null, answer: plain[1].trim() });
         continue;
       }
+      // Lookbehind, so one entry's trailing space doesn't hide the next entry's number.
+      const re = /(?<=^|\s)(?:ข้อ(?:ที่)?\s*)?(\d{1,3})\s*[.):](?!\d)\s*|(?<=^|\s)ข้อ(?:ที่)?\s*(\d{1,3})\s+/g;
+      // A number inside brackets is part of an answer ("30. ตอบ ก. Data Link Layer (Layer 2)"), not the next entry.
+      const depthAt = (at: number) => [...u.text.slice(0, at)].reduce((d, c) => d + (c === "(" ? 1 : c === ")" ? -1 : 0), 0);
+      const hits = [...u.text.matchAll(re)].filter((h) => depthAt(h.index!) <= 0);
+      if (!hits.length) continue;
       hits.forEach((h, i) => {
         const answer = u.text.slice(h.index! + h[0].length, hits[i + 1]?.index ?? u.text.length).replace(/^(ตอบ|คำตอบ)\s*[:：]?\s*/, "").trim();
         if (answer) keyEntries.push({ num: Number(h[1] ?? h[2]), answer });
@@ -464,7 +520,19 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
   const bankByNorm = new Map(bank.map((b) => [normalizeCode(b.code), b.code]));
   for (const [block, answer] of answersByBlock) {
     const qs = block.slots.map((s) => byKey.get(s)!).filter(Boolean);
-    const parts = qs.length > 1 ? answer.split(/\s*[,，;|]\s*|\s{2,}/).filter(Boolean) : [answer];
+    let parts = qs.length > 1 ? answer.split(/\s*[,，;|]\s*|\s{2,}/).filter(Boolean) : [answer];
+    if (qs.length > 1 && qs[0].type === "FILL_IN_BANK") {
+      // "V (แทร็ก และ เซกเตอร์)", "A05 B12": the codes, leaving out the words in brackets.
+      const codes = [...answer.replace(/\([^)]*\)/g, " ").matchAll(/(?<![A-Za-z0-9])\[?\s*(code\s*\d{1,3}|[A-Z]{1,3}\d{0,3})\s*\]?(?![A-Za-z0-9])/gi)]
+        .map((m) => m[1])
+        .filter((c) => bankByNorm.has(normalizeCode(c)));
+      if (codes.length === qs.length) parts = codes;
+      else if (codes.length === 1) {
+        // One entry covers every blank of the question.
+        parts = qs.map(() => codes[0]);
+        warnings.push(`ข้อ ${block.num} มี ${qs.length} ช่องแต่เฉลยมีรหัสเดียว (${codes[0]}) — ใส่รหัสนี้ให้ทุกช่องแล้ว ตรวจดูอีกครั้ง`);
+      }
+    }
     qs.forEach((q, i) => {
       const a = (parts[i] ?? "").trim();
       if (!a) return;
@@ -480,10 +548,14 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
           }
           if (idx < 0) idx = q.options.findIndex((o) => norm(o.label) === norm(a.replace(/^\(?[ก-ฮa-jA-J1-9]\)?[.)]\s*/, "")));
         }
-        if (idx >= 0 && idx < q.options.length) q.options.forEach((o, j) => (o.isCorrect = j === idx));
-        else warnings.push(`เฉลยข้อ ${block.num} "${a}" ไม่ตรงกับตัวเลือก — เลือกเองด้านล่าง`);
+        if (idx >= 0 && idx < q.options.length) {
+          q.options.forEach((o, j) => (o.isCorrect = j === idx));
+          const why = rationale(a, q.options[idx].label);
+          if (why) q.explanation = why;
+        } else warnings.push(`เฉลยข้อ ${block.num} "${a}" ไม่ตรงกับตัวเลือก — เลือกเองด้านล่าง`);
       } else if (q.type === "FILL_IN_BANK") {
-        const code = bankByNorm.get(normalizeCode(a.match(/\[?\s*(code\s*\d{1,3}|[A-Z]{1,3}\d{0,3})\s*\]?/i)?.[1] ?? a));
+        const bare = a.replace(/\([^)]*\)/g, " ").trim() || a;
+        const code = bankByNorm.get(normalizeCode(bare.match(/\[?\s*(code\s*\d{1,3}|[A-Z]{1,3}\d{0,3})\s*\]?/i)?.[1] ?? bare));
         if (code) q.bankAnswer = code;
         else warnings.push(`เฉลยข้อ ${block.num}: รหัส ${a} ไม่มีในคลังตัวเลือก`);
       } else {
@@ -513,6 +585,12 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
       (q.type === "SHORT_ANSWER" && !q.answerKey)
   ).length;
   if (missing > 0) warnings.push(`ยังไม่มีเฉลย ${missing} ข้อ — ใส่เฉลยด้านล่างก่อนบันทึก`);
+  // Keys that look like bank codes (A, B, AC, A05) with no bank found: the bank table wasn't read.
+  const codeKeys = questions.filter((q) => q.type === "SHORT_ANSWER" && /^\[?[A-Z]{1,3}\d{0,3}\]?$/.test(String(q.answerKey ?? "").trim())).length;
+  if (!bank.length && codeKeys >= 3)
+    warnings.unshift(
+      `ไม่พบคลังตัวเลือก แต่เฉลย ${codeKeys} ข้อเป็นรหัส (เช่น A, B) — ตรวจว่าเอกสารมีตาราง Option Bank เป็นตาราง (รหัส | คำตอบ) ก่อนบันทึก ไม่อย่างนั้นนักศึกษาจะไม่เห็นคลังคำตอบ`
+    );
   const essays = questions.filter((q) => q.type === "ESSAY").length;
   if (essays > 0) warnings.push(`มีข้อเขียน (อัตนัย) ${essays} ข้อ — ไม่นับในคะแนนอัตโนมัติ อาจารย์อ่านคำตอบได้ในหน้าคุมสอบ`);
 
