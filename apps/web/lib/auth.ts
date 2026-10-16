@@ -42,6 +42,26 @@ export function storeSession(
   if (session.refreshToken) window.localStorage.setItem(storageKey("refreshToken", side), session.refreshToken);
   window.localStorage.setItem(storageKey("role", side), session.role);
   window.localStorage.setItem(storageKey("fullName", side), session.fullName);
+  touchActivity(side);
+}
+
+/** A student session ends after this long without use (lab computers are shared). */
+export const STUDENT_IDLE_MS = 5 * 60_000;
+
+/**
+ * Last time this side was used (a mouse move, a key, a tap). Lab computers are
+ * shared: a student session left idle is signed out (components/IdleLogout.tsx).
+ */
+export function touchActivity(side?: Side) {
+  try {
+    window.localStorage.setItem(storageKey("lastActive", side), String(Date.now()));
+  } catch {}
+}
+
+/** Milliseconds since this side was last used; Infinity when never recorded (a session from before the rule). */
+export function idleFor(side?: Side): number {
+  const at = Number(window.localStorage.getItem(storageKey("lastActive", side)) ?? 0);
+  return at > 0 ? Date.now() - at : Infinity;
 }
 
 export function getStoredRole(): Role | null {
@@ -67,6 +87,7 @@ export function logout() {
   window.localStorage.removeItem(storageKey("refreshToken"));
   window.localStorage.removeItem(storageKey("role"));
   window.localStorage.removeItem(storageKey("fullName"));
+  window.localStorage.removeItem(storageKey("lastActive"));
 }
 
 /** Builds a /login?next=... URL that sends the user back where they were headed. */

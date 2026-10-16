@@ -109,7 +109,9 @@ export async function login(req: Request, res: Response) {
   }
 
   const accessToken = signAccessToken({ sub: user.id, role: user.role as Role, email: user.email });
-  const refreshToken = signRefreshToken({ sub: user.id });
+  // Students sign in on shared lab computers: their session lasts a school day at most
+  // (the site also signs them out after 5 idle minutes).
+  const refreshToken = signRefreshToken({ sub: user.id }, user.role === "STUDENT" ? "12h" : undefined);
 
   // In production the frontend (Vercel) and API (Render) are different
   // origins, so the cookie needs SameSite=None to survive a cross-site

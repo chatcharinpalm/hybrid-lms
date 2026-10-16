@@ -12,8 +12,9 @@ export function signAccessToken(payload: AccessTokenPayload): string {
   return jwt.sign(payload, env.jwt.accessSecret, { expiresIn: env.jwt.accessTtl as any });
 }
 
-export function signRefreshToken(payload: { sub: string }): string {
-  return jwt.sign(payload, env.jwt.refreshSecret, { expiresIn: env.jwt.refreshTtl as any });
+/** `ttl` overrides the configured lifetime (student sessions are kept short: lab computers are shared). */
+export function signRefreshToken(payload: { sub: string }, ttl?: string): string {
+  return jwt.sign(payload, env.jwt.refreshSecret, { expiresIn: (ttl ?? env.jwt.refreshTtl) as any });
 }
 
 export function verifyAccessToken(token: string): AccessTokenPayload {

@@ -251,6 +251,12 @@ function LoginForm() {
               </div>
             )}
 
+            {searchParams.get("expired") === "1" && (
+              <p className="flex items-center gap-1.5 rounded-lg border border-amber-400/30 bg-amber-400/10 p-2.5 text-xs text-amber-200">
+                <span className="material-symbols-outlined text-sm">timer_off</span>
+                ออกจากระบบอัตโนมัติแล้ว เพราะไม่ได้ใช้งานเกิน 5 นาที — กรุณาเข้าสู่ระบบใหม่
+              </p>
+            )}
             {next && !teacherMode && (
               <p className="rounded-lg border border-white/10 bg-black/30 p-2.5 text-xs text-white/60">กรุณาเข้าสู่ระบบเพื่อเข้าสู่ห้องสอบ</p>
             )}

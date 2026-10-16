@@ -2,10 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { isLoggedIn, loginUrl } from "@/lib/auth";
+import { idleFor, isLoggedIn, loginUrl, logout } from "@/lib/auth";
+import { IDLE_LIMIT_MS, IdleLogout } from "@/components/IdleLogout";
 import { usePortalSettings } from "@/lib/portalSettings";
 import { TopNav } from "./TopNav";
 import { SunsetScene } from "@/components/login/SunsetScene";
+
+/** Set once an idle session has been signed out and the page is leaving for /login. */
+let expiring = false;
 
 export function PortalShell({ children }: { children: React.ReactNode }) {
   const settings = usePortalSettings();
@@ -19,6 +23,15 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   const [signedIn, setSignedIn] = useState<boolean | null>(null);
 
   useEffect(() => {
+    // A session left idle too long is someone else's (shared lab computers): out before anything shows.
+    if (isLoggedIn() && idleFor() > IDLE_LIMIT_MS) {
+      logout();
+      expiring = true;
+      window.location.replace("/login?expired=1");
+      return;
+    }
+    // Already on the way to the sign-in page (effects can run twice).
+    if (expiring) return;
     const ok = isLoggedIn();
     setSignedIn(ok);
     if (!ok) router.replace(loginUrl(pathname));
@@ -33,6 +46,7 @@ export function PortalShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="relative min-h-screen">
       <SunsetScene dim />
+      <IdleLogout />
       <TopNav hiddenMenus={hiddenMenus} />
       <main className="relative w-full px-4 sm:px-6 lg:px-8 py-6 lg:py-8 space-y-8 max-w-7xl mx-auto">
         {onHiddenPage ? null : children}
