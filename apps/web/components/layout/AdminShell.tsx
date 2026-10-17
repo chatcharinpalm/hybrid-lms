@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { href: "/backoffice/exams/combine", label: "ข้อสอบรวมหลายบท", icon: "library_add" },
   { href: "/backoffice/exams/new", label: "สร้างข้อสอบ", icon: "post_add" },
   { href: "/backoffice/materials/upload", label: "อัพโหลดเอกสาร", icon: "upload_file" },
+  { href: "/backoffice/study", label: "บทเรียนทบทวน", icon: "menu_book" },
 ];
 
 // Fully separate visual identity from the student-facing (portal) shell —

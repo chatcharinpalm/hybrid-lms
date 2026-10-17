@@ -13,6 +13,7 @@ import { attendanceRouter } from "./routes/attendance.routes";
 import { courseRouter } from "./routes/course.routes";
 import { studentRouter } from "./routes/student.routes";
 import { settingsRouter } from "./routes/settings.routes";
+import { studyRouter } from "./routes/study.routes";
 import { errorHandler } from "./middleware/errorHandler";
 import { prisma } from "./prisma";
 
@@ -39,6 +40,7 @@ app.use("/api/attendance", attendanceRouter);
 app.use("/api/courses", courseRouter);
 app.use("/api/students", studentRouter);
 app.use("/api/settings", settingsRouter);
+app.use("/api/study", studyRouter);
 
 app.use(errorHandler);
 

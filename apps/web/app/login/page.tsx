@@ -5,7 +5,7 @@ import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 import { isStaff, storeSession, type Role } from "@/lib/auth";
-import { SunsetScene } from "@/components/login/SunsetScene";
+import { LoginBackdrop } from "@/components/login/LoginBackdrop";
 import { programTheme } from "@/lib/program";
 
 interface LoginResponse {
@@ -128,7 +128,7 @@ function LoginForm() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[#12071f] p-3 sm:p-5">
-      <SunsetScene />
+      <LoginBackdrop />
       <div className="relative mx-auto grid min-h-[calc(100vh-1.5rem)] max-w-[1280px] items-center gap-5 sm:min-h-[calc(100vh-2.5rem)] lg:grid-cols-[1fr_1.05fr]">
         {/* Left: the sign-in form, a dark glass panel in a fiery frame */}
         <div className={`relative mx-auto w-full max-w-[480px] rounded-[28px] ${FRAME} p-[1.5px] shadow-[0_30px_80px_rgba(20,0,20,0.7),0_0_40px_rgba(240,102,31,0.25)]`}>

@@ -11,6 +11,7 @@ const NAV_ITEMS: Array<{ href: string; label: string; icon: string; menu?: Porta
   { href: "/courses", label: "คอร์สเรียน", icon: "cast_for_education", menu: "courses" },
   { href: "/attendance", label: "เช็คชื่อเข้าเรียน", icon: "co_present", menu: "attendance" },
   { href: "/exams", label: "ศูนย์สอบ", icon: "assignment_turned_in" },
+  { href: "/study", label: "ทบทวนบทเรียน", icon: "menu_book" },
 ];
 
 // A horizontal top nav (logo left, menu center, account right) — the

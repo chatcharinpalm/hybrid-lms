@@ -78,6 +78,69 @@ model Course {
   sessions    ClassSession[]
   materials   CourseMaterial[]
   exams       Exam[]
+  studyChapters StudyChapter[]
+}
+
+// Review lessons (ทบทวนบทเรียน): open any time, no timer, no anti-cheat.
+// Separate from Exam so the exam system is untouched.
+model StudyChapter {
+  id         String   @id @default(uuid())
+  courseId   String
+  number     Int
+  title      String
+  published  Boolean  @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  course     Course @relation(fields: [courseId], references: [id], onDelete: Cascade)
+  sections   StudySection[]
+  questions  StudyQuestion[]
+  worksheets StudyWorksheet[]
+
+  @@unique([courseId, number])
+}
+
+model StudySection {
+  id        String   @id @default(uuid())
+  chapterId String
+  order     Int
+  title     String
+  // Array of blocks: { type: "text", text } | { type: "image", url, alt }
+  blocks    Json
+
+  chapter   StudyChapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@index([chapterId, order])
+}
+
+model StudyQuestion {
+  id          String   @id @default(uuid())
+  chapterId   String
+  order       Int
+  text        String   @db.Text
+  // Array of { label, text }; answerIndex points into it
+  choices     Json
+  answerIndex Int
+  explanation String?  @db.Text
+
+  chapter     StudyChapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@index([chapterId, order])
+}
+
+model StudyWorksheet {
+  id        String   @id @default(uuid())
+  chapterId String
+  order     Int
+  title     String
+  // Same block shape as StudySection
+  blocks    Json
+  // Answers as blocks too; shown to students only on request
+  answers   Json?
+
+  chapter   StudyChapter @relation(fields: [chapterId], references: [id], onDelete: Cascade)
+
+  @@index([chapterId, order])
 }
 
 model Enrollment {
