@@ -1,8 +1,8 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { backofficeLoginUrl, getStoredRole, idleFor, isLoggedIn, isStaff, logout, STAFF_IDLE_MS } from "@/lib/auth";
+import { backofficeLoginUrl, getStoredRole, idleFor, idleLimit, isLoggedIn, isProctoringPath, isStaff, logout } from "@/lib/auth";
 import { IdleLogout } from "@/components/IdleLogout";
 import { AdminShell } from "@/components/layout/AdminShell";
 
@@ -15,7 +15,7 @@ export default function BackofficeLayout({ children }: { children: React.ReactNo
 
   useEffect(() => {
     // A session left idle for 30 minutes is signed out before anything shows (shared computers).
-    if (isLoggedIn() && idleFor() > STAFF_IDLE_MS) {
+    if (isLoggedIn() && idleFor() > idleLimit()) {
       logout();
       setState("redirecting");
       window.location.replace("/login?as=teacher&expired=30");
@@ -35,11 +35,9 @@ export default function BackofficeLayout({ children }: { children: React.ReactNo
   return (
     <AdminShell>
       {/* Proctoring pages are watched, not touched: no idle sign-out while one is open. */}
-      <IdleLogout paused={isProctoringPage(pathname)} />
+      <IdleLogout paused={isProctoringPath(pathname)} />
       {children}
     </AdminShell>
   );
 }
 
-/** The exam list with its live room panel, and an exam's live monitor. */
-const isProctoringPage = (path: string) => path === "/backoffice/monitor" || /^\/backoffice\/exams\/[^/]+\/monitor$/.test(path);

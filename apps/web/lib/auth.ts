@@ -1,4 +1,4 @@
-export type Role = "ADMIN" | "TEACHER" | "STUDENT";
+﻿export type Role = "ADMIN" | "TEACHER" | "STUDENT";
 
 /**
  * The back office (/backoffice) keeps its own login, stored under separate
@@ -51,7 +51,18 @@ export const STUDENT_IDLE_MS = 5 * 60_000;
 export const STAFF_IDLE_MS = 30 * 60_000;
 
 /** The idle limit for the side of the current page. */
-export const idleLimit = () => (typeof window !== "undefined" && isBackofficePath(window.location.pathname) ? STAFF_IDLE_MS : STUDENT_IDLE_MS);
+/**
+ * Proctoring pages (the exam list's live panel and each exam's monitor) are watched, not touched:
+ * the proctor walks around the room, so these never sign the teacher out for being idle.
+ */
+export const isProctoringPath = (path: string) => path === "/backoffice/monitor" || /^\/backoffice\/exams\/[^/]+\/monitor$/.test(path);
+
+export const idleLimit = () => {
+  if (typeof window === "undefined") return STUDENT_IDLE_MS;
+  const path = window.location.pathname;
+  if (isProctoringPath(path)) return Infinity;
+  return isBackofficePath(path) ? STAFF_IDLE_MS : STUDENT_IDLE_MS;
+};
 
 /** Where an idle sign-out lands: the sign-in page, on the right tab, saying why. */
 export const expiredLoginUrl = () =>
@@ -108,3 +119,4 @@ export function loginUrl(next: string): string {
 export function backofficeLoginUrl(next: string): string {
   return `/login?as=teacher&next=${encodeURIComponent(next)}`;
 }
+
