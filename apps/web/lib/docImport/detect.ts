@@ -108,6 +108,14 @@ function bankPairs(t: TableUnit) {
       if (code && label && CODE_RE.test(code)) pairs.push({ code: canonicalCode(code), label });
     }
   }
+  // Numbered entries, one per cell: "(1) 0", "(2) สวิตช์ทางดิจิทัล / ทรานซิสเตอร์".
+  for (const row of t.rows) {
+    for (const cell of row) {
+      if (cell.hidden) continue;
+      const m = cell.text.trim().match(/^\((\d{1,3})\)\s*(\S.*)$/);
+      if (m) pairs.push({ code: m[1], label: m[2].trim() });
+    }
+  }
   // Code and text in the same cell (a cell may hold one entry or several lines of them).
   for (const row of t.rows) {
     for (const cell of row) {
@@ -708,10 +716,12 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
         } else warnings.push(`เฉลยข้อ ${block.num} "${a}" ไม่ตรงกับตัวเลือก — เลือกเองด้านล่าง`);
       } else if (q.type === "FILL_IN_BANK") {
         const clean = cleanKey(a);
+        // "(7) 2": the entry's number as printed in the bank.
+        const numbered = clean.match(/^\((\d{1,3})\)/)?.[1];
         const bare = clean.replace(/\([^)]*\)/g, " ").trim() || clean;
         // A code only when the whole answer is one ("A", "[A01]", "Code 3"), so "Address" never reads as "A".
         const whole = bare.match(/^\[?\s*(code\s*\d{1,3}|[A-Z]{1,3}-?\d{0,3}|\d{1,3})\s*\]?$/i)?.[1];
-        const code = whole ? bankByNorm.get(normalizeCode(whole)) : undefined;
+        const code = numbered ? bankByNorm.get(normalizeCode(numbered)) : whole ? bankByNorm.get(normalizeCode(whole)) : undefined;
         // No code given: the key's words are matched to the bank entry with the same words.
         const byWords = code ? undefined : bank.find((b) => sameWords(b.label, clean)) ?? matchBankWord(bank, clean);
         if (code) q.bankAnswer = code;
