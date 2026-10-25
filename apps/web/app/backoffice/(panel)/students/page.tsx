@@ -261,11 +261,11 @@ function SignInSheet({ section, students }: { section: string; students: RosterS
             </thead>
             <tbody>
               {rows.map((s) => (
-                <tr key={s.id} className="break-inside-avoid">
-                  <td className="w-[14mm] border border-black/70 px-2 text-center font-bold">{s.seatNumber}</td>
-                  <td className="w-[44mm] border border-black/70 px-2 font-mono text-[12pt]">{s.studentCode}</td>
-                  <td className="border border-black/70 px-2">{s.fullName}</td>
-                  <td className="w-[50mm] border border-black/70 px-2" />
+                <tr key={s.id} className="h-[8mm] break-inside-avoid">
+                  <td className="w-[14mm] border border-black/70 px-2 py-0 text-center font-bold leading-none">{s.seatNumber}</td>
+                  <td className="w-[44mm] border border-black/70 px-2 py-0 font-mono text-[12pt] leading-none">{s.studentCode}</td>
+                  <td className="border border-black/70 px-2 py-0 leading-none">{s.fullName}</td>
+                  <td className="w-[50mm] border border-black/70 px-2 py-0" />
                 </tr>
               ))}
             </tbody>
