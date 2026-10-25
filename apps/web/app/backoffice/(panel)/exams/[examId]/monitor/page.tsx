@@ -263,14 +263,20 @@ export default function LiveProctorPage() {
     return true;
   });
 
-  // Students in class-list order (room by room, ก–ฮ), or rule-breakers first.
+  // Students room by room, then by seat number from smallest to largest; or rule-breakers first.
   const roomStudents = room === "ALL" ? data.students : data.students.filter((s) => s.section === room);
   const rooms = [...new Set(data.students.map((s) => s.section).filter((s): s is string => Boolean(s)))];
+  const bySeat = [...roomStudents].sort(
+    (a, b) =>
+      (a.section ?? "").localeCompare(b.section ?? "", "th") ||
+      (a.seatNumber ?? Number.MAX_SAFE_INTEGER) - (b.seatNumber ?? Number.MAX_SAFE_INTEGER) ||
+      a.studentCode.localeCompare(b.studentCode)
+  );
   const wallStudents = cheatersFirst
     ? [...roomStudents].sort(
         (a, b) => b.violations.length - a.violations.length || a.studentCode.localeCompare(b.studentCode)
       )
-    : roomStudents;
+    : bySeat;
 
   // The proctor alone opens and closes the room; students can retake as often as they like while it is open.
   const roomControls = (
