@@ -99,24 +99,28 @@ const CODE_CELL = /^(\[\s*(?:code\s*\d{1,3}|[A-Z]{1,3}\d{0,3})\s*\]|[A-Z]{1,3}\d
 
 function bankPairs(t: TableUnit) {
   const pairs: Array<{ code: string; label: string }> = [];
-  // Code and text in neighbouring cells.
+  // Code and text in neighbouring cells. The code may carry a stray dot, colon or bracket ("A.", "[A01]", " B ").
   for (const row of t.rows) {
     const cells = row.filter((c) => !c.hidden);
     for (let c = 0; c + 1 < cells.length; c += 2) {
-      const code = cells[c].text;
-      const label = cells[c + 1].text;
+      const code = cells[c].text.trim().replace(/^[\[(]\s*|\s*[\])]$|[.):：]$/g, "").trim();
+      const label = cells[c + 1].text.trim();
       if (code && label && CODE_RE.test(code)) pairs.push({ code: canonicalCode(code), label });
     }
   }
-  if (pairs.length > 0) return pairs;
-  // Code and text in the same cell.
+  // Code and text in the same cell (a cell may hold one entry or several lines of them).
   for (const row of t.rows) {
     for (const cell of row) {
-      const m = !cell.hidden && cell.text.match(CODE_CELL);
-      if (m) pairs.push({ code: canonicalCode(m[1].replace(/[.):]$/, "")), label: m[2].trim() });
+      if (cell.hidden) continue;
+      for (const line of cell.text.split(/\n|\s{2,}/)) {
+        const m = line.trim().match(CODE_CELL);
+        if (m) pairs.push({ code: canonicalCode(m[1].replace(/[.):：]$/, "")), label: m[2].trim() });
+      }
     }
   }
-  return pairs;
+  // The same entry can be read twice (one cell with two lines); keep the first of each code.
+  const seen = new Set<string>();
+  return pairs.filter((p) => (seen.has(p.code) ? false : (seen.add(p.code), true)));
 }
 
 /** "ก. aaa  ข. bbb" → choices, when the line starts with the next expected marker. */
@@ -169,6 +173,31 @@ function rationale(answer: string, label: string): string | null {
   return (wrapped ? wrapped[1] : rest).trim() || null;
 }
 
+/**
+ * The answer text of a written (blank) question: the teacher's notes around it are not part of the answer.
+ * "เฉลยตอบ: 2 ________ (วิเคราะห์ตามวัตถุประสงค์ข้อที่ 4: …)" → "2".
+ */
+function cleanKey(answer: string): string {
+  return answer
+    .replace(/^\s*(เฉลย(?:ตอบ)?|คำตอบ|ตอบ)\s*[:：]\s*/, "")
+    .replace(/\(\s*(?:วิเคราะห์|ตามวัตถุประสงค์|วัตถุประสงค์)[^)]*\)?/g, "")
+    .replace(/ตามวัตถุประสงค์ข้อที่\s*\d*\.?/g, "")
+    .replace(/_{2,}/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[\s/,;|]+$/, "")
+    .trim();
+}
+
+/** Same words, ignoring spaces and case; "Operand (ตัวถูกดำเนินการ)" matches "Operand". */
+function sameWords(a: string, b: string) {
+  const w = (s: string) => s.normalize("NFC").toLowerCase().replace(/\s+/g, "").replace(/[.)]$/, "");
+  const bare = (s: string) => w(s.replace(/\([^)]*\)/g, ""));
+  const x = w(a);
+  const y = w(b);
+  return !!x && (x === y || (!!bare(a) && bare(a) === bare(b)));
+}
+
 /** Most of the paragraph highlighted, coloured or bold: a teacher's answer mark. */
 function styleMark(p: ParaUnit) {
   const chars = (f: (r: ParaUnit["runs"][number]) => boolean | undefined) =>
@@ -203,10 +232,40 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
   };
 
   // ── Option Bank (fill-in-the-blank papers) ──
-  const bankAt = units.findIndex((u) => u.kind === "table" && bankPairs(u).length >= 4);
+  // A table bank ("รหัส | คำตอบ"), or a bank written as lines of "(1) … (22) …" numbered entries.
+  const tableBankAt = units.findIndex((u) => u.kind === "table" && bankPairs(u).length >= 4);
+  let bankAt = tableBankAt;
+  let bankRun: { from: number; to: number; pairs: Array<{ code: string; label: string }> } | null = null;
+  if (tableBankAt < 0) {
+    const paraBankAt = (u: Unit) => u.kind === "p" && (u.text.match(/\(\d{1,3}\)/g) ?? []).length >= 2;
+    const from = units.findIndex(paraBankAt);
+    if (from >= 0) {
+      let to = from;
+      while (to + 1 < units.length && paraBankAt(units[to + 1])) to++;
+      const pairs: Array<{ code: string; label: string }> = [];
+      for (const u of units.slice(from, to + 1)) {
+        if (u.kind !== "p") continue;
+        const marks = [...u.text.matchAll(/\((\d{1,3})\)\s*/g)];
+        marks.forEach((m, k) => {
+          const label = u.text.slice(m.index! + m[0].length, marks[k + 1]?.index ?? u.text.length).trim();
+          if (label) pairs.push({ code: m[1], label });
+        });
+      }
+      if (pairs.length >= 8 && to - from >= 3) {
+        bankRun = { from, to, pairs };
+        bankAt = from;
+      }
+    }
+  }
   const seen = new Set<string>();
-  const bank = bankAt < 0 ? [] : bankPairs(units[bankAt] as TableUnit).filter((b) => (seen.has(b.code) ? false : (seen.add(b.code), true)));
+  const bankSource = bankRun ? bankRun.pairs : bankAt < 0 ? [] : bankPairs(units[bankAt] as TableUnit);
+  const bank = bankSource.filter((b) => (seen.has(b.code) ? false : (seen.add(b.code), true)));
   bank.sort((a, b) => compareCodes(a.code, b.code));
+
+  // A key table ("ข้อที่ | วัตถุประสงค์ | คำตอบ") can sit in the body: it is read as the key and never shown on the paper.
+  const isKeyTable = (u: Unit) =>
+    u.kind === "table" && u.rows.some((r) => r.some((c) => /คำตอบ|เฉลย/.test(c.text))) && u.rows.some((r) => r.some((c) => /^ข้อ/.test(c.text.trim())));
+  const keyTableAt = units.findIndex(isKeyTable);
 
   // ── Answer key section: everything from its heading on ──
   let keyAt = -1;
@@ -223,7 +282,11 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
     });
   }
   const body = keyAt >= 0 ? units.slice(0, keyAt) : units;
-  const keyUnits = keyAt >= 0 ? units.slice(keyAt + 1) : [];
+  const keyUnits = [
+    ...(keyTableAt >= 0 && (keyAt < 0 || keyTableAt < keyAt) ? [units[keyTableAt]] : []),
+    ...(keyAt >= 0 ? units.slice(keyAt + 1) : []),
+  ];
+  const skipped = (i: number) => i === keyTableAt || (bankRun !== null && i > bankRun.from && i <= bankRun.to);
 
   // ── Questions ──
   const built: Building[] = [];
@@ -253,8 +316,14 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
       blocks.push({ t: "bank" });
       return;
     }
+    if (skipped(i)) return;
     if (u.kind === "p") {
       const text = u.text;
+      // "1. ชุดข้อสอบ ชุด A (สำหรับนักศึกษา…)" is the paper's set heading, not question 1.
+      if (/^(\d{1,2}\s*[.)]\s*)?ชุดข้อสอบ/.test(text)) {
+        pendingHtml.push(renderPara(u));
+        return;
+      }
       let qm = text.match(Q_TEXT);
       // "41 หาก…" — a number with no dot counts only when it is exactly the next question.
       if (!qm && lastNum > 0) {
@@ -486,6 +555,18 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
       });
     } else {
       const rows = u.rows.map((r) => r.filter((c) => !c.hidden).map((c) => c.text));
+      // A key table with a header ("ข้อที่ | วัตถุประสงค์ | คำตอบ"): read the number and answer columns by name.
+      const head = rows.findIndex((r) => r.some((c) => /คำตอบ|เฉลย|answer/i.test(c)));
+      const numCol = head >= 0 ? rows[head].findIndex((c) => /ข้อ|no\.?|#/i.test(c)) : -1;
+      const ansCol = head >= 0 ? rows[head].findIndex((c) => /คำตอบ|เฉลย|answer/i.test(c)) : -1;
+      if (head >= 0 && ansCol >= 0) {
+        rows.slice(head + 1).forEach((row) => {
+          const n = numCol >= 0 ? row[numCol]?.match(/\d{1,3}/)?.[0] : undefined;
+          const answer = row[ansCol]?.trim();
+          if (n && answer) keyEntries.push({ num: Number(n), answer });
+        });
+        continue;
+      }
       rows.forEach((row, ri) => {
         const numberRow = row.length > 1 && row.every((c) => /^\d{1,3}\.?$/.test(c) || !c);
         if (numberRow && rows[ri + 1]) {
@@ -554,12 +635,18 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
           if (why) q.explanation = why;
         } else warnings.push(`เฉลยข้อ ${block.num} "${a}" ไม่ตรงกับตัวเลือก — เลือกเองด้านล่าง`);
       } else if (q.type === "FILL_IN_BANK") {
-        const bare = a.replace(/\([^)]*\)/g, " ").trim() || a;
-        const code = bankByNorm.get(normalizeCode(bare.match(/\[?\s*(code\s*\d{1,3}|[A-Z]{1,3}\d{0,3})\s*\]?/i)?.[1] ?? bare));
+        const clean = cleanKey(a);
+        const bare = clean.replace(/\([^)]*\)/g, " ").trim() || clean;
+        // A code only when the whole answer is one ("A", "[A01]", "Code 3"), so "Address" never reads as "A".
+        const whole = bare.match(/^\[?\s*(code\s*\d{1,3}|[A-Z]{1,3}\d{0,3}|\d{1,3})\s*\]?$/i)?.[1];
+        const code = whole ? bankByNorm.get(normalizeCode(whole)) : undefined;
+        // No code given: the key's words are matched to the bank entry with the same words.
+        const byWords = code ? undefined : bank.find((b) => sameWords(b.label, clean));
         if (code) q.bankAnswer = code;
-        else warnings.push(`เฉลยข้อ ${block.num}: รหัส ${a} ไม่มีในคลังตัวเลือก`);
+        else if (byWords) q.bankAnswer = byWords.code;
+        else warnings.push(`เฉลยข้อ ${block.num}: "${clean}" ไม่มีในคลังตัวเลือก`);
       } else {
-        q.answerKey = a;
+        q.answerKey = cleanKey(a);
       }
     });
   }
@@ -568,7 +655,8 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
   const firstQ = units.findIndex((u) => u.kind === "p" && Q_TEXT.test(u.text));
   const header = units.slice(0, firstQ < 0 ? 10 : firstQ).flatMap((u) => (u.kind === "p" && u.text ? [u.text] : []));
   const fileTitle = fileName.replace(/\.(docx|pdf)$/i, "");
-  const title = header.find((t) => /แบบทดสอบ|ข้อสอบ|บทที่|quiz|exam|test/i.test(t) && t.length < 200) ?? header[0] ?? fileTitle;
+  // The file's name says which chapter it is; the header's wording varies from paper to paper.
+  const title = fileTitle;
   const time = header.join(" ").match(/(\d{1,3})\s*นาที/) ?? header.join(" ").match(/(\d)\s*ชั่วโมง/);
   const durationMinutes = time ? (time[0].includes("ชั่วโมง") ? Number(time[1]) * 60 : Number(time[1])) : 60;
 
