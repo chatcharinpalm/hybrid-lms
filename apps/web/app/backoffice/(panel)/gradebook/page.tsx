@@ -24,6 +24,8 @@ export default function GradebookPage() {
   const [detail, setDetail] = useState<{ studentId: string; examId: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetError, setResetError] = useState<string | null>(null);
 
   const setCourseId = (id: string) => {
     setCourseIdState(id);
@@ -53,6 +55,26 @@ export default function GradebookPage() {
       .then(setBook)
       .catch((err: Error) => setError(err.message));
   }, [courseId]);
+
+  /**
+   * Re-score: the chosen sittings stop counting (they stay in the record, struck through).
+   * The student can then sit the exam again.
+   */
+  const resetSittings = async (ids: string[], label: string) => {
+    if (!courseId || !window.confirm(`รีคะแนนของ${label}?\nครั้งที่เลือกจะไม่นับในคะแนน แต่ยังเก็บไว้ในประวัติ`)) return;
+    setResetting(true);
+    setResetError(null);
+    try {
+      for (const id of ids) {
+        await apiFetch(`/api/exams/attempts/${id}/control/reset`, { method: "POST", body: JSON.stringify({ reason: "รีคะแนนจากสมุดคะแนน" }) });
+      }
+      setBook(await apiFetch<Gradebook>(`/api/exams/gradebook/${courseId}`));
+    } catch (err) {
+      setResetError(err instanceof Error ? err.message : "รีคะแนนไม่สำเร็จ");
+    } finally {
+      setResetting(false);
+    }
+  };
 
   // Every sitting per student per exam, oldest first.
   const sittings = useMemo(() => {
@@ -278,6 +300,7 @@ export default function GradebookPage() {
                   <th className="py-1.5 text-center">คะแนน</th>
                   <th className="py-1.5 text-center">ผล</th>
                   <th className="py-1.5 text-left">หมายเหตุ</th>
+                  <th className="py-1.5 text-right">รีคะแนน</th>
                 </tr>
               </thead>
               <tbody>
@@ -301,10 +324,38 @@ export default function GradebookPage() {
                         .filter(Boolean)
                         .join(" · ")}
                     </td>
+                    <td className="py-1.5 text-right">
+                      {!a.archivedAt && a.status !== "IN_PROGRESS" && (
+                        <button
+                          type="button"
+                          disabled={resetting}
+                          onClick={() => resetSittings([a.id], `${detailStudent.fullName} ครั้งที่ ${i + 1} ของ ${detailExam.title}`)}
+                          className="rounded-md border border-error/40 px-2 py-0.5 text-[11px] font-bold text-error hover:bg-error/10 disabled:opacity-50"
+                        >
+                          รีคะแนน
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            {resetError && <p className="mt-3 text-xs text-error">{resetError}</p>}
+            {(() => {
+              const live = (sittings.get(`${detail.studentId}:${detail.examId}`) ?? []).filter((a) => !a.archivedAt && a.status !== "IN_PROGRESS");
+              return live.length > 0 ? (
+                <div className="mt-4 flex justify-end">
+                  <button
+                    type="button"
+                    disabled={resetting}
+                    onClick={() => resetSittings(live.map((a) => a.id), `${detailStudent.fullName} ทั้ง ${live.length} ครั้งของ ${detailExam.title}`)}
+                    className="rounded-lg border border-error/40 bg-error/10 px-3 py-1.5 text-xs font-bold text-error hover:bg-error/20 disabled:opacity-50"
+                  >
+                    {resetting ? "กำลังรีคะแนน..." : "รีคะแนนชุดนี้ทั้งหมด"}
+                  </button>
+                </div>
+              ) : null;
+            })()}
           </div>
         </div>
       )}
