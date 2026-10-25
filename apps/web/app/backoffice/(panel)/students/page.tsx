@@ -225,37 +225,62 @@ export default function StudentsPage() {
   );
 }
 
+/** Students per printed page of the sign-in sheet. */
+const SHEET_ROWS = 25;
+
 function SignInSheet({ section, students }: { section: string; students: RosterStudent[] }) {
+  const pages = Array.from({ length: Math.ceil(students.length / SHEET_ROWS) }, (_, i) => students.slice(i * SHEET_ROWS, (i + 1) * SHEET_ROWS));
   return (
-    <div className="font-paper text-[15pt] leading-tight text-black">
-      <div className="mb-3 text-center">
-        <div className="text-[18pt] font-bold">ใบเซ็นชื่อเข้าสอบ</div>
-        <div>ห้อง {section} · จำนวน {students.length} คน</div>
-        <div className="mt-1">
-          รายวิชา ........................................................ แบบทดสอบ ........................................ วันที่ ....................
-        </div>
-      </div>
-      <table className="w-full border-collapse">
-        <thead>
-          <tr>
-            {["เลขที่", "รหัสนักศึกษา", "ชื่อ - สกุล", "ลายเซ็น"].map((h) => (
-              <th key={h} className="border border-black px-2 py-1 font-bold">
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {students.map((s) => (
-            <tr key={s.id} className="break-inside-avoid">
-              <td className="w-[12mm] border border-black px-2 py-1 text-center">{s.seatNumber}</td>
-              <td className="w-[42mm] border border-black px-2 py-1">{s.studentCode}</td>
-              <td className="border border-black px-2 py-1">{s.fullName}</td>
-              <td className="w-[45mm] border border-black px-2 py-1" />
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="font-paper text-[14pt] leading-snug text-black">
+      {pages.map((rows, p) => (
+        <section key={p} className={p > 0 ? "break-before-page" : undefined}>
+          <header className="mb-3 flex items-end justify-between border-b-2 border-black pb-2">
+            <div>
+              <div className="text-[20pt] font-bold">ใบเซ็นชื่อเข้าสอบ</div>
+              <div className="text-[13pt]">
+                รายวิชา ....................................................... แบบทดสอบ ...................................................
+              </div>
+            </div>
+            <div className="text-right text-[13pt]">
+              <div>ห้อง {section}</div>
+              <div>
+                วันที่ ..................... · หน้า {p + 1}/{pages.length}
+              </div>
+              <div className="text-[11pt] text-black/70">ทั้งหมด {students.length} คน</div>
+            </div>
+          </header>
+          <table className="w-full border-collapse text-[13pt]">
+            <thead>
+              <tr className="bg-black/10">
+                {["ที่", "รหัสนักศึกษา", "ชื่อ - สกุล", "ลายเซ็น"].map((h) => (
+                  <th key={h} className="border border-black/70 px-2 py-1.5 text-left font-bold first:text-center">
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((s) => (
+                <tr key={s.id} className="break-inside-avoid">
+                  <td className="w-[14mm] border border-black/70 px-2 text-center font-bold">{s.seatNumber}</td>
+                  <td className="w-[44mm] border border-black/70 px-2 font-mono text-[12pt]">{s.studentCode}</td>
+                  <td className="border border-black/70 px-2">{s.fullName}</td>
+                  <td className="w-[50mm] border border-black/70 px-2" />
+                </tr>
+              ))}
+              {/* Keep every page at the same height, even when the last one is short. */}
+              {Array.from({ length: SHEET_ROWS - rows.length }, (_, i) => (
+                <tr key={`pad-${i}`} aria-hidden>
+                  <td className="border border-black/70 px-2 py-0">&nbsp;</td>
+                  <td className="border border-black/70" />
+                  <td className="border border-black/70" />
+                  <td className="border border-black/70" />
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      ))}
     </div>
   );
 }
