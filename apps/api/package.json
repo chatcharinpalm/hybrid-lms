@@ -5,6 +5,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "nodemon --watch src --ext ts --exec \"node -r ts-node/register/transpile-only src/index.ts\"",
+    "keepalive": "node -r ts-node/register/transpile-only scripts/keepalive.ts",
     "build": "prisma generate && tsc -p tsconfig.json",
     "vercel-build": "prisma generate",
     "start": "node dist/index.js",
@@ -48,3 +49,4 @@
     "typescript": "^5.5.3"
   }
 }
+

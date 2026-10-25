@@ -16,6 +16,7 @@ import { settingsRouter } from "./routes/settings.routes";
 import { studyRouter } from "./routes/study.routes";
 import { errorHandler } from "./middleware/errorHandler";
 import { prisma } from "./prisma";
+import { keepDatabaseAwake } from "./services/keepalive";
 
 const app = express();
 
@@ -30,8 +31,7 @@ app.get("/health", (_req, res) => res.json({ ok: true }));
 // Hit daily by a Vercel cron (vercel.json): a real query keeps the free Supabase
 // project from pausing itself after a week without traffic (e.g. over a break).
 app.get("/api/keepalive", async (_req, res) => {
-  await prisma.$queryRaw`SELECT 1`;
-  res.json({ ok: true, at: new Date().toISOString() });
+  res.json(await keepDatabaseAwake());
 });
 
 app.use("/api/auth", authRouter);
