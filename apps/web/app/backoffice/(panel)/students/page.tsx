@@ -268,15 +268,6 @@ function SignInSheet({ section, students }: { section: string; students: RosterS
                   <td className="w-[50mm] border border-black/70 px-2" />
                 </tr>
               ))}
-              {/* Keep every page at the same height, even when the last one is short. */}
-              {Array.from({ length: SHEET_ROWS - rows.length }, (_, i) => (
-                <tr key={`pad-${i}`} aria-hidden>
-                  <td className="border border-black/70 px-2 py-0">&nbsp;</td>
-                  <td className="border border-black/70" />
-                  <td className="border border-black/70" />
-                  <td className="border border-black/70" />
-                </tr>
-              ))}
             </tbody>
           </table>
         </section>
