@@ -96,6 +96,7 @@ export async function setExamStatus(
 export async function updateExamSettings(
   examId: string,
   settings: {
+    title?: string;
     isHidden?: boolean;
     reviewMode?: "AFTER_SUBMIT" | "AFTER_CLOSE" | "NEVER";
     durationMinutes?: number;
@@ -109,7 +110,7 @@ export async function updateExamSettings(
   const exam = await prisma.exam.update({
     where: { id: examId },
     data: { ...rest, ...(sections !== undefined ? { sections: writeSections(sections) } : {}) },
-    select: { id: true, isHidden: true, reviewMode: true, durationMinutes: true, sections: true },
+    select: { id: true, title: true, isHidden: true, reviewMode: true, durationMinutes: true, sections: true },
   });
   await audit(actor, "EXAM_SETTINGS", "Exam", examId, examId, settings);
   return { ...exam, sections: readSections(exam.sections) };

@@ -49,6 +49,68 @@ function RoomsRow({ exam, rooms, onChange }: { exam: CourseExam; rooms: string[]
   );
 }
 
+/** The exam's name, with a pencil to rename it (saved to the server; students see the new name). */
+function TitleEditor({ exam, onChange }: { exam: CourseExam; onChange: (title: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(exam.title);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const save = async () => {
+    const title = value.trim();
+    if (!title) {
+      setError("ใส่ชื่อข้อสอบ");
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await apiFetch(`/api/exams/${exam.id}/settings`, { method: "PATCH", body: JSON.stringify({ title }) });
+      onChange(title);
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "บันทึกไม่สำเร็จ");
+    } finally {
+      setBusy(false);
+    }
+  };
+  if (!editing) {
+    return (
+      <div className="flex items-center gap-2">
+        <h4 className="text-sm font-semibold text-on-surface">{exam.title}</h4>
+        <button
+          type="button"
+          title="แก้ชื่อข้อสอบ"
+          onClick={() => {
+            setValue(exam.title);
+            setEditing(true);
+          }}
+          className="material-symbols-outlined text-[16px] text-outline hover:text-primary"
+        >
+          edit
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        maxLength={300}
+        autoFocus
+        className="min-w-0 flex-1 rounded-md border border-outline-variant/40 bg-surface-container-lowest px-2 py-1 text-sm text-on-surface"
+      />
+      <button type="button" onClick={save} disabled={busy} className="px-2 py-1 rounded-md text-xs font-bold bg-primary/15 text-primary border border-primary/40 disabled:opacity-50">
+        บันทึก
+      </button>
+      <button type="button" onClick={() => setEditing(false)} disabled={busy} className="px-2 py-1 rounded-md text-xs text-outline border border-outline-variant/30">
+        ยกเลิก
+      </button>
+      {error && <span className="text-[11px] text-error">{error}</span>}
+    </div>
+  );
+}
+
 /** Hides the exam from students (not listed, cannot be started) or shows it again. */
 function HideButton({ exam, onChange }: { exam: CourseExam; onChange: (hidden: boolean) => void }) {
   const [busy, setBusy] = useState(false);
@@ -251,7 +313,7 @@ export default function AdminMonitorHubPage() {
                           ปิดอยู่
                         </span>
                       )}
-                      <h4 className="text-sm font-semibold text-on-surface">{ex.title}</h4>
+                      <TitleEditor exam={ex} onChange={(title) => setExams((list) => list.map((e) => (e.id === ex.id ? { ...e, title } : e)))} />
                       <p className="text-xs text-outline mt-0.5">
                         เวลา: {ex.durationMinutes} นาที •{" "}
                         <span className={ex.status === "OPEN" ? "font-bold text-emerald-400" : ""}>{STATUS_TH[ex.status] ?? ex.status}</span>

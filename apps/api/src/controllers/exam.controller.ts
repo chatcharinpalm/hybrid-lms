@@ -526,6 +526,7 @@ export async function getCourseSections(req: Request, res: Response) {
 export async function updateExamSettings(req: Request, res: Response) {
   const settings = z
     .object({
+      title: z.string().trim().min(1).max(300).optional(),
       isHidden: z.boolean().optional(),
       reviewMode: z.enum(["AFTER_SUBMIT", "AFTER_CLOSE", "NEVER"]).optional(),
       durationMinutes: z.number().int().min(1).max(600).optional(),
