@@ -1,4 +1,4 @@
-import type { ChoiceMarker, PaperBlock } from "@/types/exam";
+﻿import type { ChoiceMarker, PaperBlock } from "@/types/exam";
 import { renderPara, renderTable, type Cut } from "./render";
 import { cleanText, rawText, type ParaUnit, type TableUnit, type Unit } from "./units";
 
@@ -58,14 +58,14 @@ const Q_TEXT = /^(?:ข้อ(?:ที่)?\s*)?(\d{1,3})\s*[.):]\s*|^ข้อ(
 const Q_RAW = /^\s*(?:ข้อ(?:ที่)?\s*)?\d{1,3}\s*[.):]\s*|^\s*ข้อ(?:ที่)?\s*\d{1,3}\s+/;
 const BLANK_G = /\[\s*[.…_·\s]{2,}\s*\]|\(\s*[.…_·]{3,}\s*\)|[.…_·]{4,}|_{3,}/g;
 const PART = /^(ส่วนที่|ตอนที่|ตอน|part|section)\s*[\dก-ฮIVX๑-๙]+/i;
-const KEY_HEAD = /^(?:เฉลย|answer\s*key|answers?\b|key\s*[:：])/i;
+const KEY_HEAD = /^(?:เฉลย|ตารางเฉลย|answer\s*key|answers?\b|key\s*[:：])/i;
 const ANSWER_LINE = /^(?:ตอบ|คำตอบ|answer|ans)\s*[:：.]?\s*(.+)$/i;
 const TF_HINT = /ถูก.{0,40}ผิด|ผิด.{0,40}ถูก|true.{0,40}false|✓.{0,40}✗/i;
 /** Choices that point at other choices; their order must stay as printed. */
 const REFERS = /ทุกข้อ|ทั้ง\s*\S+\s*และ|ไม่มีข้อใด|ข้อ\s*[กขคงจ]\s*(และ|หรือ|,)|all of the above|none of the above|both\s+\S+\s+and|\b[a-d]\s+and\s+[a-d]\b/i;
 const MARK_CHARS = /^\s*[*✓✔√]\s*|\s*[*✓✔√]\s*$/g;
 /** Bank codes: "[Code 01]", "Code 1", "A", "AB", "[A01]". */
-const CODE_RE = /^\[?\s*(code\s*\d{1,3}|[A-Z]{1,3}\d{0,3})\s*\]?$/i;
+const CODE_RE = /^\[?\s*(code\s*\d{1,3}|[A-Z]{1,3}-?\d{0,3})\s*\]?$/i;
 
 const SUB: Record<string, string> = { "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉", "+": "₊", "-": "₋" };
 const SUP: Record<string, string> = { "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "+": "⁺", "-": "⁻", n: "ⁿ", E: "ᴱ" };
@@ -95,7 +95,7 @@ function compareCodes(a: string, b: string) {
 }
 
 /** A whole bank entry in one cell: "A. ฟลิปฟลอป (Flip-flop)", "AB) …", "[A01] …". */
-const CODE_CELL = /^(\[\s*(?:code\s*\d{1,3}|[A-Z]{1,3}\d{0,3})\s*\]|[A-Z]{1,3}\d{0,3}\s*[.):])\s*(\S.*)$/;
+const CODE_CELL = /^(\[\s*(?:code\s*\d{1,3}|[A-Z]{1,3}-?\d{0,3})\s*\]|[A-Z]{1,3}-?\d{0,3}\s*[.):])\s*(\S.*)$/;
 
 function bankPairs(t: TableUnit) {
   const pairs: Array<{ code: string; label: string }> = [];
@@ -186,7 +186,44 @@ function cleanKey(answer: string): string {
     .replace(/\s+/g, " ")
     .trim()
     .replace(/[\s/,;|]+$/, "")
-    .trim();
+    .trim()
+    .slice(0, 1000);
+}
+
+/**
+ * A key table's columns: the header row names each number column ("ข้อที่") and the answer column
+ * right after it or further along ("คำตอบ", "คำตอบที่ถูกต้อง", "ตัวเลือกที่ถูกต้อง"). Several pairs side by side are allowed.
+ */
+function keyColumns(rows: string[][]): { head: number; pairs: Array<[number, number]> } | null {
+  const isAns = (c: string) => /คำตอบ|เฉลย|ตัวเลือกที่ถูก|answer|correct/i.test(c);
+  const isNum = (c: string) => /^(ข้อ|no\.?|#)/i.test(c.trim());
+  const head = rows.findIndex((r) => r.some(isAns));
+  if (head < 0) return null;
+  const hdr = rows[head];
+  const pairs: Array<[number, number]> = [];
+  hdr.forEach((c, j) => {
+    if (!isNum(c)) return;
+    const k = hdr.findIndex((x, idx) => idx > j && (isAns(x) || isNum(x)));
+    if (k > j && isAns(hdr[k])) pairs.push([j, k]);
+  });
+  return pairs.length ? { head, pairs } : null;
+}
+
+/** The words of an entry, split at brackets and slashes: "Clock Generator / Crystal Oscillator (ตัวกำเนิด…)". */
+function wordsOf(s: string) {
+  return s
+    .normalize("NFC")
+    .toLowerCase()
+    .split(/\s*[/()]\s*|\s+หรือ\s+/)
+    .map((x) => x.replace(/\s+/g, ""))
+    .filter((x) => x.length >= 3);
+}
+
+/** The one bank entry that shares a word with the key ("Clock Generator" in "ตัวกำเนิดสัญญาณนาฬิกา (Clock Generator)"); none when it is ambiguous. */
+function matchBankWord(bank: Array<{ code: string; label: string }>, key: string) {
+  const mine = wordsOf(key);
+  const hits = bank.filter((b) => wordsOf(b.label).some((w) => mine.includes(w)));
+  return hits.length === 1 ? hits[0] : undefined;
 }
 
 /** Same words, ignoring spaces and case; "Operand (ตัวถูกดำเนินการ)" matches "Operand". */
@@ -257,14 +294,49 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
       }
     }
   }
+  // A bank written as one numbered list run over several lines: "1. ตรงกัน 2. Conflict 3. Dirty Bit" … "42. …".
+  // Entries are read strictly in order (1, 2, 3…), so a stray number inside a label is not taken as an entry.
+  if (!bankRun && tableBankAt < 0) {
+    const parseSeq = (text: string) => {
+      const entries: Array<{ code: string; label: string }> = [];
+      let pos = 0;
+      for (let n = 1; ; n++) {
+        const re = new RegExp(`(?:^|\\s)${n}(?:[.)]\\s*|\\s+)(?=\\S)`, "g");
+        re.lastIndex = pos;
+        const m = re.exec(text);
+        if (!m) break;
+        if (n > 1) entries[entries.length - 1].label = text.slice(pos, m.index).trim();
+        entries.push({ code: String(n), label: "" });
+        pos = m.index + m[0].length;
+      }
+      if (entries.length) entries[entries.length - 1].label = text.slice(pos).trim();
+      return entries;
+    };
+    const from = units.findIndex((u) => u.kind === "p" && /(?:^|\s)1[.)]\s*\S/.test(u.text) && /(?:^|\s)2[.)]\s*\S/.test(u.text));
+    if (from >= 0) {
+      let text = "";
+      let to = from - 1;
+      for (let i = from; i < units.length && units[i].kind === "p"; i++) {
+        // The paragraph must carry the next number in the run.
+        const expected = parseSeq(text).length + 1;
+        if (!new RegExp(`(?:^|\\s)${expected}(?:[.)]\\s*|\\s+)(?=\\S)`).test(" " + units[i].text + " ")) break;
+        text += " " + units[i].text;
+        to = i;
+      }
+      const pairs = parseSeq(text);
+      if (pairs.length >= 10 && to - from >= 1) {
+        bankRun = { from, to, pairs };
+        bankAt = from;
+      }
+    }
+  }
   const seen = new Set<string>();
   const bankSource = bankRun ? bankRun.pairs : bankAt < 0 ? [] : bankPairs(units[bankAt] as TableUnit);
   const bank = bankSource.filter((b) => (seen.has(b.code) ? false : (seen.add(b.code), true)));
   bank.sort((a, b) => compareCodes(a.code, b.code));
 
   // A key table ("ข้อที่ | วัตถุประสงค์ | คำตอบ") can sit in the body: it is read as the key and never shown on the paper.
-  const isKeyTable = (u: Unit) =>
-    u.kind === "table" && u.rows.some((r) => r.some((c) => /คำตอบ|เฉลย/.test(c.text))) && u.rows.some((r) => r.some((c) => /^ข้อ/.test(c.text.trim())));
+  const isKeyTable = (u: Unit) => u.kind === "table" && !!keyColumns(u.rows.map((r) => r.filter((c) => !c.hidden).map((c) => c.text)));
   const keyTableAt = units.findIndex(isKeyTable);
 
   // ── Answer key section: everything from its heading on ──
@@ -501,7 +573,7 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
         promptParts.push(part.unit.text);
       }
     }
-    const prompt = cleanText(promptParts.join(" ")) || `ข้อ ${b.num}`;
+    const prompt = (cleanText(promptParts.join(" ")) || `ข้อ ${b.num}`).slice(0, 1000); // the server caps a prompt at 5000 characters; the paper itself keeps the full text
     const points = Number(prompt.match(/\(\s*(\d{1,2})\s*คะแนน\s*\)/)?.[1] ?? 1);
 
     if (type === "SINGLE_CHOICE" || type === "ESSAY") slots.push(newKey());
@@ -547,7 +619,7 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
       const re = /(?<=^|\s)(?:ข้อ(?:ที่)?\s*)?(\d{1,3})\s*[.):](?!\d)\s*|(?<=^|\s)ข้อ(?:ที่)?\s*(\d{1,3})\s+/g;
       // A number inside brackets is part of an answer ("30. ตอบ ก. Data Link Layer (Layer 2)"), not the next entry.
       const depthAt = (at: number) => [...u.text.slice(0, at)].reduce((d, c) => d + (c === "(" ? 1 : c === ")" ? -1 : 0), 0);
-      const hits = [...u.text.matchAll(re)].filter((h) => depthAt(h.index!) <= 0);
+      const hits = [...u.text.matchAll(re)].filter((h) => depthAt(h.index!) <= 0 && !/(ส่วนที่|ตอนที่)\s*$/.test(u.text.slice(0, h.index!)));
       if (!hits.length) continue;
       hits.forEach((h, i) => {
         const answer = u.text.slice(h.index! + h[0].length, hits[i + 1]?.index ?? u.text.length).replace(/^(ตอบ|คำตอบ)\s*[:：]?\s*/, "").trim();
@@ -555,15 +627,15 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
       });
     } else {
       const rows = u.rows.map((r) => r.filter((c) => !c.hidden).map((c) => c.text));
-      // A key table with a header ("ข้อที่ | วัตถุประสงค์ | คำตอบ"): read the number and answer columns by name.
-      const head = rows.findIndex((r) => r.some((c) => /คำตอบ|เฉลย|answer/i.test(c)));
-      const numCol = head >= 0 ? rows[head].findIndex((c) => /ข้อ|no\.?|#/i.test(c)) : -1;
-      const ansCol = head >= 0 ? rows[head].findIndex((c) => /คำตอบ|เฉลย|answer/i.test(c)) : -1;
-      if (head >= 0 && ansCol >= 0) {
-        rows.slice(head + 1).forEach((row) => {
-          const n = numCol >= 0 ? row[numCol]?.match(/\d{1,3}/)?.[0] : undefined;
-          const answer = row[ansCol]?.trim();
-          if (n && answer) keyEntries.push({ num: Number(n), answer });
+      // A key table: its header names the number and answer columns ("ข้อที่ | คำตอบ", or several pairs side by side).
+      const cols = keyColumns(rows);
+      if (cols) {
+        rows.slice(cols.head + 1).forEach((row) => {
+          for (const [n, a] of cols.pairs) {
+            const num = row[n]?.match(/\d{1,3}/)?.[0];
+            const answer = row[a]?.trim();
+            if (num && answer) keyEntries.push({ num: Number(num), answer });
+          }
         });
         continue;
       }
@@ -632,16 +704,16 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
         if (idx >= 0 && idx < q.options.length) {
           q.options.forEach((o, j) => (o.isCorrect = j === idx));
           const why = rationale(a, q.options[idx].label);
-          if (why) q.explanation = why;
+          if (why) q.explanation = why.slice(0, 4000);
         } else warnings.push(`เฉลยข้อ ${block.num} "${a}" ไม่ตรงกับตัวเลือก — เลือกเองด้านล่าง`);
       } else if (q.type === "FILL_IN_BANK") {
         const clean = cleanKey(a);
         const bare = clean.replace(/\([^)]*\)/g, " ").trim() || clean;
         // A code only when the whole answer is one ("A", "[A01]", "Code 3"), so "Address" never reads as "A".
-        const whole = bare.match(/^\[?\s*(code\s*\d{1,3}|[A-Z]{1,3}\d{0,3}|\d{1,3})\s*\]?$/i)?.[1];
+        const whole = bare.match(/^\[?\s*(code\s*\d{1,3}|[A-Z]{1,3}-?\d{0,3}|\d{1,3})\s*\]?$/i)?.[1];
         const code = whole ? bankByNorm.get(normalizeCode(whole)) : undefined;
         // No code given: the key's words are matched to the bank entry with the same words.
-        const byWords = code ? undefined : bank.find((b) => sameWords(b.label, clean));
+        const byWords = code ? undefined : bank.find((b) => sameWords(b.label, clean)) ?? matchBankWord(bank, clean);
         if (code) q.bankAnswer = code;
         else if (byWords) q.bankAnswer = byWords.code;
         else warnings.push(`เฉลยข้อ ${block.num}: "${clean}" ไม่มีในคลังตัวเลือก`);
@@ -684,3 +756,12 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
 
   return { title, durationMinutes, bank, blocks, questions, warnings };
 }
+
+
+
+
+
+
+
+
+
