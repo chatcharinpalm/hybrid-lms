@@ -334,8 +334,8 @@ export async function listExamsForCourse(req: Request, res: Response) {
     orderBy: { createdAt: "desc" },
     include: { _count: { select: { questions: true } } },
   });
-  // Students see only the exams set for their own room.
-  const mine = staff ? exams : await forMyRoom(req, exams);
+  // Students see only the exams set for their own room, and only the ones the proctor has opened.
+  const mine = staff ? exams : (await forMyRoom(req, exams)).filter((e) => e.status === "OPEN");
   return res.json(mine.map((e) => ({ ...e, sections: readSections(e.sections) })));
 }
 

@@ -45,7 +45,9 @@ export async function listCourses(req: Request, res: Response) {
   return res.json(
     courses.map(({ exams, ...c }) => {
       const visible = staff ? exams : exams.filter((e) => !e.isHidden && (!req.user || roomAllowed(e, mySection)));
-      return { ...c, examCount: visible.length, openExamCount: visible.filter((e) => e.status === "OPEN").length };
+      const openCount = visible.filter((e) => e.status === "OPEN").length;
+      // Students are shown only the exams that are open right now.
+      return { ...c, examCount: staff ? visible.length : openCount, openExamCount: openCount };
     })
   );
 }
