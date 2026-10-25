@@ -195,6 +195,8 @@ export async function importDocumentExam(req: Request, res: Response) {
         maxViolations: 3,
         shuffleQuestions: true,
         shuffleOptions: true,
+        // Students see their score only; the marked answers and key are not shown after the exam.
+        reviewMode: "NEVER",
         paperJson: JSON.stringify(blocks),
       },
       select: { id: true, title: true },
