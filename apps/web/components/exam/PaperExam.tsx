@@ -40,8 +40,22 @@ const normalizeCode = (s: string) =>
   s
     .toUpperCase()
     .replace(/CODE/g, "")
-    .replace(/[\s[\]]/g, "")
+    .replace(/[\s[\]-]/g, "")
     .replace(/\d+/g, (d) => String(Number(d)));
+
+/**
+ * The pictures an imported question carries in its document block, for the
+ * sheet (which draws the question from its plain text). `above`: the document
+ * puts the picture before the words.
+ */
+function picturesOf(paper: ExamPaper, questionId: string) {
+  const block = paper.document?.find((b) => b.t === "q" && b.slots.includes(questionId));
+  if (!block || block.t !== "q") return null;
+  const imgs = block.html.match(/<img[^>]*>/g);
+  if (!imgs) return null;
+  const before = block.html.slice(0, block.html.search(/<img/)).replace(/<[^>]+>/g, "").trim();
+  return { html: imgs.join(""), above: !before };
+}
 
 /** One flowable piece of the paper; pages are packed from these by measured height. */
 type Block =
@@ -141,8 +155,10 @@ export function PaperExam({ paper, answers, onAnswerChange, onPageChange, onSubm
 
   useLayoutEffect(() => {
     paginate();
-    // Re-cut once the paper font has loaded (it changes line breaks).
+    // Re-cut once the paper font (it changes line breaks) and the pictures have loaded.
     document.fonts?.ready.then(paginate).catch(() => undefined);
+    const imgs = Array.from(measureRef.current?.querySelectorAll("img") ?? []);
+    imgs.forEach((img) => !img.complete && img.addEventListener("load", paginate, { once: true }));
   }, [paginate]);
 
   // ── Viewer: one whole sheet per screen, shrunk to fit (never enlarged past A4) ──
@@ -638,8 +654,11 @@ function BlockFlow({ blocks, paper, sections, usedLabels, questions, answers, me
     } else if (b.kind === "question") {
       const q = questions[b.index];
       const longestLabel = longest[sectionOfQuestion.get(b.index) ?? 0];
+      const pictures = picturesOf(paper, q.id);
+      const picture = pictures && <div className="doc-html py-1 text-center" dangerouslySetInnerHTML={{ __html: pictures.html }} />;
       out.push(
         <div key={b.key} {...tag(b.key)} className="pb-3">
+          {pictures?.above && picture}
           <PaperQuestion
             number={b.index + 1}
             question={q}
@@ -650,6 +669,7 @@ function BlockFlow({ blocks, paper, sections, usedLabels, questions, answers, me
             onFocus={(el) => onFocusBlank(q.id, el)}
             onChange={(ids) => onAnswerChange(q.id, { selectedOptionIds: ids })}
           />
+          {pictures && !pictures.above && picture}
         </div>
       );
     }
@@ -758,7 +778,7 @@ function PaperQuestion({ number, question, selectedOptionId, active, readOnly, r
           {codePrefix && <span className="text-black/45">{codePrefix}</span>}
           <input
             value={text}
-            onChange={(e) => setText(e.target.value.toUpperCase().replace(/[^0-9A-Z]/g, "").slice(0, 6))}
+            onChange={(e) => setText(e.target.value.toUpperCase().replace(/[^0-9A-Zก-ฮ-]/g, "").slice(0, 6))}
             onKeyDown={(e) => e.key === "Enter" && (save(), e.currentTarget.blur())}
             onFocus={(e) => onFocus(e.currentTarget)}
             onClick={(e) => onFocus(e.currentTarget)}
