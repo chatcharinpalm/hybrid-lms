@@ -66,6 +66,9 @@ const REFERS = /ทุกข้อ|ทั้ง\s*\S+\s*และ|ไม่ม�
 const MARK_CHARS = /^\s*[*✓✔√]\s*|\s*[*✓✔√]\s*$/g;
 /** Bank codes: "[Code 01]", "Code 1", "A", "AB", "[A01]". */
 const CODE_RE = /^\[?\s*(code\s*\d{1,3}|[A-Z]{1,3}-?\d{0,3})\s*\]?$/i;
+/** Thai bank codes: "ก01" alone, "[ก]" or "[ก 01]" in brackets (a bare "ก." is a choice, not a code). */
+const THAI_CODE = /^[ก-ฮ]{1,2}\s*\d{1,3}$/;
+const THAI_CODE_BRACKETED = /^\[\s*[ก-ฮ]{1,2}\s*\d{0,3}\s*\]$/;
 
 const SUB: Record<string, string> = { "0": "₀", "1": "₁", "2": "₂", "3": "₃", "4": "₄", "5": "₅", "6": "₆", "7": "₇", "8": "₈", "9": "₉", "+": "₊", "-": "₋" };
 const SUP: Record<string, string> = { "0": "⁰", "1": "¹", "2": "²", "3": "³", "4": "⁴", "5": "⁵", "6": "⁶", "7": "⁷", "8": "⁸", "9": "⁹", "+": "⁺", "-": "⁻", n: "ⁿ", E: "ᴱ" };
@@ -79,7 +82,7 @@ const norm = (s: string) => s.normalize("NFC").toLowerCase().replace(/\s+/g, "")
 function canonicalCode(raw: string): string {
   const inner = raw.replace(/[[\]]/g, "").trim();
   const m = inner.match(/^code\s*(\d+)$/i);
-  return m ? `Code ${m[1].padStart(2, "0")}` : inner.toUpperCase();
+  return m ? `Code ${m[1].padStart(2, "0")}` : inner.replace(/\s+/g, "").toUpperCase();
 }
 
 function compareCodes(a: string, b: string) {
@@ -95,17 +98,28 @@ function compareCodes(a: string, b: string) {
 }
 
 /** A whole bank entry in one cell: "A. ฟลิปฟลอป (Flip-flop)", "AB) …", "[A01] …". */
-const CODE_CELL = /^(\[\s*(?:code\s*\d{1,3}|[A-Z]{1,3}-?\d{0,3})\s*\]|[A-Z]{1,3}-?\d{0,3}\s*[.):])\s*(\S.*)$/;
+const CODE_CELL = /^(\[\s*(?:code\s*\d{1,3}|[A-Z]{1,3}-?\d{0,3}|[ก-ฮ]{1,2}\s*\d{0,3})\s*\]|[A-Z]{1,3}-?\d{0,3}\s*[.):])\s*(\S.*)$/;
 
-function bankPairs(t: TableUnit) {
+/** `numbered`: also read "1. Coaxial Cable" cells; only for a table above the questions, where it can't be an answer key. */
+function bankPairs(t: TableUnit, numbered = false) {
   const pairs: Array<{ code: string; label: string }> = [];
   // Code and text in neighbouring cells. The code may carry a stray dot, colon or bracket ("A.", "[A01]", " B ").
   for (const row of t.rows) {
     const cells = row.filter((c) => !c.hidden);
     for (let c = 0; c + 1 < cells.length; c += 2) {
-      const code = cells[c].text.trim().replace(/^[\[(]\s*|\s*[\])]$|[.):：]$/g, "").trim();
+      const cell = cells[c].text.trim();
+      const code = cell.replace(/^[\[(]\s*|\s*[\])]$|[.):：]$/g, "").trim();
       const label = cells[c + 1].text.trim();
-      if (code && label && CODE_RE.test(code)) pairs.push({ code: canonicalCode(code), label });
+      if (code && label && (CODE_RE.test(code) || THAI_CODE.test(code) || THAI_CODE_BRACKETED.test(cell))) pairs.push({ code: canonicalCode(code), label });
+    }
+  }
+  if (numbered) {
+    for (const row of t.rows) {
+      for (const cell of row) {
+        if (cell.hidden) continue;
+        const m = cell.text.trim().match(/^(\d{1,3})[.)]\s*(\S.*)$/);
+        if (m) pairs.push({ code: m[1], label: m[2].trim() });
+      }
     }
   }
   // Numbered entries, one per cell: "(1) 0", "(2) สวิตช์ทางดิจิทัล / ทรานซิสเตอร์".
@@ -188,6 +202,14 @@ function rationale(answer: string, label: string): string | null {
 function cleanKey(answer: string): string {
   return answer
     .replace(/^\s*(เฉลย(?:ตอบ)?|คำตอบ|ตอบ)\s*[:：]\s*/, "")
+    .replace(/\s*คำอธิบาย\s*[:：].*$/s, "")
+    // Formulas pasted as LaTeX: "$20\text{ dB/km}$" → "20 dB/km".
+    .replace(/\\text\{([^}]*)\}/g, "$1")
+    .replace(/\\cdot/g, "⋅")
+    .replace(/\\lambda/g, "λ")
+    .replace(/\\ge(?:q)?/g, "≥")
+    .replace(/\\le(?:q)?/g, "≤")
+    .replace(/\$/g, "")
     .replace(/\(\s*(?:วิเคราะห์|ตามวัตถุประสงค์|วัตถุประสงค์)[^)]*\)?/g, "")
     .replace(/ตามวัตถุประสงค์ข้อที่\s*\d*\.?/g, "")
     .replace(/_{2,}/g, " ")
@@ -212,7 +234,18 @@ function keyColumns(rows: string[][]): { head: number; pairs: Array<[number, num
   hdr.forEach((c, j) => {
     if (!isNum(c)) return;
     const k = hdr.findIndex((x, idx) => idx > j && (isAns(x) || isNum(x)));
-    if (k > j && isAns(hdr[k])) pairs.push([j, k]);
+    if (k <= j || !isAns(hdr[k])) return;
+    // "ข้อที่ | รหัสเฉลย | คำตอบที่ถูกต้อง": the words are the answer; a code column can be out of step with the bank.
+    let answer = k;
+    if (/รหัส|code/i.test(hdr[k])) {
+      for (let m = k + 1; m < hdr.length && !isNum(hdr[m]); m++) {
+        if (isAns(hdr[m])) {
+          answer = m;
+          break;
+        }
+      }
+    }
+    pairs.push([j, answer]);
   });
   return pairs.length ? { head, pairs } : null;
 }
@@ -278,7 +311,18 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
 
   // ── Option Bank (fill-in-the-blank papers) ──
   // A table bank ("รหัส | คำตอบ"), or a bank written as lines of "(1) … (22) …" numbered entries.
-  const tableBankAt = units.findIndex((u) => u.kind === "table" && bankPairs(u).length >= 4);
+  // The first numbered question with a blank; anything bank-like above it can't be an answer key.
+  const hasBlank = new RegExp(BLANK_G.source);
+  const blankQ = (u: Unit, first: boolean) => {
+    if (u.kind !== "p" || !hasBlank.test(u.text)) return false;
+    const m = u.text.match(Q_TEXT);
+    return !!m && (!first || Number(m[1] ?? m[2]) === 1);
+  };
+  // Question 1 first: numbered instructions above the bank can hold a blank too ("2. … เติมลงในช่องว่าง [ ... ]").
+  const q1 = units.findIndex((u) => blankQ(u, true));
+  const firstBlankQ = q1 >= 0 ? q1 : units.findIndex((u) => blankQ(u, false));
+  const aboveQuestions = (i: number) => firstBlankQ >= 0 && i < firstBlankQ;
+  const tableBankAt = units.findIndex((u, i) => u.kind === "table" && bankPairs(u, aboveQuestions(i)).length >= 4);
   let bankAt = tableBankAt;
   let bankRun: { from: number; to: number; pairs: Array<{ code: string; label: string }> } | null = null;
   if (tableBankAt < 0) {
@@ -338,8 +382,31 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
       }
     }
   }
+  // A bank written as lines of coded entries: "A1. Fist A2. ความถี่ (Frequency) A3. …".
+  if (!bankRun && tableBankAt < 0) {
+    const CODED = /(?<=^|\s)([A-Z]{1,3}-?\d{1,3})[.)]\s+/g;
+    const codedPara = (u: Unit, i: number) => u.kind === "p" && aboveQuestions(i) && [...u.text.matchAll(CODED)].length >= 2;
+    const from = units.findIndex(codedPara);
+    if (from >= 0) {
+      let to = from;
+      while (to + 1 < units.length && codedPara(units[to + 1], to + 1)) to++;
+      const pairs: Array<{ code: string; label: string }> = [];
+      for (const u of units.slice(from, to + 1)) {
+        if (u.kind !== "p") continue;
+        const marks = [...u.text.matchAll(CODED)];
+        marks.forEach((m, k) => {
+          const label = u.text.slice(m.index! + m[0].length, marks[k + 1]?.index ?? u.text.length).replace(/[,;]\s*$/, "").trim();
+          if (label) pairs.push({ code: m[1], label });
+        });
+      }
+      if (pairs.length >= 8) {
+        bankRun = { from, to, pairs };
+        bankAt = from;
+      }
+    }
+  }
   const seen = new Set<string>();
-  const bankSource = bankRun ? bankRun.pairs : bankAt < 0 ? [] : bankPairs(units[bankAt] as TableUnit);
+  const bankSource = bankRun ? bankRun.pairs : bankAt < 0 ? [] : bankPairs(units[bankAt] as TableUnit, aboveQuestions(bankAt));
   const bank = bankSource.filter((b) => (seen.has(b.code) ? false : (seen.add(b.code), true)));
   bank.sort((a, b) => compareCodes(a.code, b.code));
 
@@ -367,6 +434,14 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
     ...(keyAt >= 0 ? units.slice(keyAt + 1) : []),
   ];
   const skipped = (i: number) => i === keyTableAt || (bankRun !== null && i > bankRun.from && i <= bankRun.to);
+  // Numbered lines above the bank ("2. ให้นักศึกษาพิจารณา…") are instructions when the questions start again at 1 below it.
+  const questionsBelowBank =
+    bankAt >= 0 &&
+    units.slice(bankAt + 1).some((u) => {
+      if (u.kind !== "p") return false;
+      const m = u.text.match(Q_TEXT);
+      return !!m && Number(m[1] ?? m[2]) === 1;
+    });
 
   // ── Questions ──
   const built: Building[] = [];
@@ -410,6 +485,7 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
         const loose = text.match(/^(\d{1,3})\s+(?=\D)/);
         if (loose && Number(loose[1]) === lastNum + 1) qm = loose;
       }
+      if (questionsBelowBank && i < bankAt) qm = null;
       // "1. ส่วนที่ 1: …" (a numbered heading) is a part of the paper, not a question.
       const afterNum = qm ? text.slice(qm[0].length) : text;
       const isPart = PART.test(afterNum) || (/^คำชี้แจง|^คำสั่ง\s*[:：]/.test(afterNum) && !!qm) || (!!u.heading && !qm);
@@ -529,25 +605,30 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
     } else {
       // Blanks inside the text are answers; a paragraph that is only dots is room to write an essay.
       const inline: Array<{ part: (typeof b.parts)[number]; start: number; end: number }> = [];
-      for (const part of b.parts) {
-        if (part.unit.kind !== "p") continue;
-        const raw = rawText(part.unit.runs);
-        const blankOnly = !cleanText(raw.replace(BLANK_G, "").replace(/[()[\]]/g, "")) && BLANK_G.test(raw);
-        BLANK_G.lastIndex = 0;
-        if (blankOnly && part !== b.parts[0]) continue;
-        let prevEnd = -1;
-        for (const m of raw.matchAll(BLANK_G)) {
-          const start = m.index!;
-          const end = start + m[0].length;
-          if (start < (part.cuts[0]?.end ?? 0)) continue;
-          // Blanks running across lines are one blank.
-          const last = inline[inline.length - 1];
-          if (last && last.part === part && prevEnd >= 0 && !raw.slice(prevEnd, start).trim()) {
-            last.end = end;
-          } else inline.push({ part, start, end });
-          prevEnd = end;
+      const findBlanks = (lineCounts: boolean) => {
+        for (const part of b.parts) {
+          if (part.unit.kind !== "p") continue;
+          const raw = rawText(part.unit.runs);
+          const blankOnly = !cleanText(raw.replace(BLANK_G, "").replace(/[()[\]]/g, "")) && BLANK_G.test(raw);
+          BLANK_G.lastIndex = 0;
+          if (blankOnly && part !== b.parts[0] && !lineCounts) continue;
+          let prevEnd = -1;
+          for (const m of raw.matchAll(BLANK_G)) {
+            const start = m.index!;
+            const end = start + m[0].length;
+            if (start < (part.cuts[0]?.end ?? 0)) continue;
+            // Blanks running across lines are one blank.
+            const last = inline[inline.length - 1];
+            if (last && last.part === part && prevEnd >= 0 && !raw.slice(prevEnd, start).trim()) {
+              last.end = end;
+            } else inline.push({ part, start, end });
+            prevEnd = end;
+          }
         }
-      }
+      };
+      findBlanks(false);
+      // With a bank, a blank alone on the next line is still the blank to fill, not room for an essay.
+      if (inline.length === 0 && bank.length > 0) findBlanks(true);
       if (inline.length > 0) {
         type = bank.length > 0 ? "FILL_IN_BANK" : "SHORT_ANSWER";
         for (const s of inline) {
@@ -717,7 +798,8 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
       } else if (q.type === "FILL_IN_BANK") {
         const clean = cleanKey(a);
         // "(7) 2": the entry's number as printed in the bank.
-        const numbered = clean.match(/^\((\d{1,3})\)/)?.[1];
+        // "[ฐ] Medium Access Control (MAC)": the code in brackets, then its words.
+        const numbered = clean.match(/^\((\d{1,3})\)/)?.[1] ?? clean.match(/^\[\s*([^\]]{1,8}?)\s*\]/)?.[1];
         const bare = clean.replace(/\([^)]*\)/g, " ").trim() || clean;
         // A code only when the whole answer is one ("A", "[A01]", "Code 3"), so "Address" never reads as "A".
         const whole = bare.match(/^\[?\s*(code\s*\d{1,3}|[A-Z]{1,3}-?\d{0,3}|\d{1,3})\s*\]?$/i)?.[1];
@@ -761,6 +843,12 @@ export function detectExam(units: Unit[], fileName: string, readerWarnings: stri
     warnings.unshift(
       `ไม่พบคลังตัวเลือก แต่เฉลย ${codeKeys} ข้อเป็นรหัส (เช่น A, B) — ตรวจว่าเอกสารมีตาราง Option Bank เป็นตาราง (รหัส | คำตอบ) ก่อนบันทึก ไม่อย่างนั้นนักศึกษาจะไม่เห็นคลังคำตอบ`
     );
+  // The paper speaks of a bank but none was read: say so, or every blank silently becomes a typed answer.
+  const written = questions.filter((q) => q.type === "SHORT_ANSWER").length;
+  const headerText = units.slice(0, firstQ < 0 ? 10 : firstQ).map((u) => u.text).join(" ");
+  if (!bank.length && written >= 3 && codeKeys < 3 && /คลัง|ตัวเลือกคำตอบ|ตารางตัวเลือก|option\s*bank|answer\s*bank/i.test(headerText)) {
+    warnings.unshift(`เอกสารพูดถึงคลังตัวเลือก แต่ระบบอ่านคลังไม่ได้ — ถ้าบันทึกตอนนี้ นักศึกษาจะต้องพิมพ์คำตอบเองทั้ง ${written} ข้อ และจะไม่มีคลังให้เลือก`);
+  }
   const essays = questions.filter((q) => q.type === "ESSAY").length;
   if (essays > 0) warnings.push(`มีข้อเขียน (อัตนัย) ${essays} ข้อ — ไม่นับในคะแนนอัตโนมัติ อาจารย์อ่านคำตอบได้ในหน้าคุมสอบ`);
 
