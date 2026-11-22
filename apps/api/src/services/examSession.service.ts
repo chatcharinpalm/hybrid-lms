@@ -1,6 +1,6 @@
 import type { ViolationType } from "../constants";
 import { prisma } from "../prisma";
-import { byThaiName } from "../utils/roster";
+import { bySeat } from "../utils/roster";
 import { generateRandomSeed, seededShuffle } from "../utils/shuffle";
 import { dealBlocks, fixedOptionIds, readPaper, slotOrder } from "./paperDocument";
 import { drawnCount, drawQuestions, readDraw } from "./draw";
@@ -352,9 +352,11 @@ export async function startOrResumeAttempt(examId: string, studentId: string) {
   // "เลขที่" on the paper: position on the room's ก–ฮ class list, as on the sign-in sheet.
   const classList = await prisma.user.findMany({
     where: { role: "STUDENT", section: student.section, enrollments: { some: { courseId: exam.courseId } } },
-    select: { id: true, firstName: true, lastName: true },
+    select: { id: true, firstName: true, lastName: true, seatNo: true },
   });
-  const seatIndex = classList.sort(byThaiName).findIndex((s) => s.id === studentId);
+  const sorted = classList.sort(bySeat);
+  const seatIndex = sorted.findIndex((s) => s.id === studentId);
+  const mySeatNo = seatIndex >= 0 ? sorted[seatIndex].seatNo : null;
 
   return {
     attemptId: attempt.id,
@@ -364,7 +366,7 @@ export async function startOrResumeAttempt(examId: string, studentId: string) {
       fullName: student.fullName,
       studentCode: student.studentCode,
       section: student.section,
-      seatNumber: seatIndex >= 0 ? seatIndex + 1 : null,
+      seatNumber: mySeatNo ?? (seatIndex >= 0 ? seatIndex + 1 : null),
     },
     startedAt: attempt.startedAt,
     durationMinutes: exam.durationMinutes,
@@ -748,6 +750,7 @@ export async function getLiveProctoringData(examId: string) {
     email: true,
     studentCode: true,
     section: true,
+    seatNo: true,
     faculty: true,
     major: true,
     avatarUrl: true,
@@ -764,13 +767,13 @@ export async function getLiveProctoringData(examId: string) {
       : await prisma.user.findMany({ where: { role: "STUDENT" }, select: studentSelect })
   )
     .filter((s) => roomAllowed(exam, s.section))
-    .sort((a, b) => sectionRank(a.section).localeCompare(sectionRank(b.section)) || byThaiName(a, b));
+    .sort((a, b) => sectionRank(a.section).localeCompare(sectionRank(b.section)) || bySeat(a, b));
   const seatInSection = new Map<string, number>();
   const perSection = new Map<string, number>();
   for (const s of studentsList) {
     const n = (perSection.get(s.section ?? "") ?? 0) + 1;
     perSection.set(s.section ?? "", n);
-    seatInSection.set(s.id, n);
+    seatInSection.set(s.id, s.seatNo ?? n);
   }
 
   // Close out attempts whose time ran out while nobody had the exam open

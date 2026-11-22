@@ -1,5 +1,5 @@
 import { prisma } from "../prisma";
-import { byThaiName } from "../utils/roster";
+import { bySeat } from "../utils/roster";
 import { drawnCount } from "./draw";
 import { readSections } from "./examRooms";
 import { ExamRuleError } from "./examSession.service";
@@ -32,7 +32,7 @@ export async function getGradebook(courseId: string, actor: StaffActor) {
     }),
     prisma.enrollment.findMany({
       where: { courseId },
-      select: { student: { select: { id: true, fullName: true, firstName: true, lastName: true, studentCode: true, section: true } } },
+      select: { student: { select: { id: true, fullName: true, firstName: true, lastName: true, studentCode: true, section: true, seatNo: true } } },
     }),
   ]);
 
@@ -49,11 +49,12 @@ export async function getGradebook(courseId: string, actor: StaffActor) {
   const sectionRank = (s: string | null) => s ?? "￿";
   const list = enrollments
     .map((e) => e.student)
-    .sort((a, b) => sectionRank(a.section).localeCompare(sectionRank(b.section)) || byThaiName(a, b));
+    .sort((a, b) => sectionRank(a.section).localeCompare(sectionRank(b.section)) || bySeat(a, b));
   const seats = new Map<string, number>();
   const students = list.map((s) => {
-    const seatNumber = (seats.get(s.section ?? "") ?? 0) + 1;
-    seats.set(s.section ?? "", seatNumber);
+    const nth = (seats.get(s.section ?? "") ?? 0) + 1;
+    seats.set(s.section ?? "", nth);
+    const seatNumber = s.seatNo ?? nth;
     return { id: s.id, fullName: s.fullName, studentCode: s.studentCode, section: s.section, seatNumber };
   });
 

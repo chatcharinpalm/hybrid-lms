@@ -14,6 +14,7 @@ apps/api/prisma/*.db-journal
 
 # Real student names/IDs: kept out of git (seed with prisma/seedRoster.ts from a local copy)
 apps/api/prisma/data/roster.json
+apps/api/prisma/data/roster-extra.json
 
 # Any env file (production DB passwords etc.), except the committed examples
 .env.*

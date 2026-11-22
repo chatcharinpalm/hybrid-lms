@@ -37,6 +37,9 @@ model User {
   faculty       String? // e.g. คณะวิศวกรรมศาสตร์ — required for student self-registration
   major         String? // e.g. วิศวกรรมคอมพิวเตอร์ — required for student self-registration
   section       String? // class group from the official roster, e.g. "CED 2 DE-RA"
+  // "เลขที่" as printed on the university's class list, for rooms imported in that
+  // order. Null = the room is listed ก–ฮ by name (byThaiName).
+  seatNo        Int?
   // Students on the roster sign in with studentCode + this code, handed out on
   // paper after they sign the attendance sheet. Kept readable so staff can
   // print the slips; passwordHash always holds its hash.

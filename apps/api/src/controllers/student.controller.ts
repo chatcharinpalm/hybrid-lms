@@ -2,7 +2,7 @@ import type { Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { prisma } from "../prisma";
-import { byThaiName, generateAccessCode } from "../utils/roster";
+import { bySeat, generateAccessCode } from "../utils/roster";
 import { programOf } from "../services/examRooms";
 
 /**
@@ -12,7 +12,7 @@ import { programOf } from "../services/examRooms";
 export async function getRoster(_req: Request, res: Response) {
   const students = await prisma.user.findMany({
     where: { role: "STUDENT", section: { not: null } },
-    select: { id: true, firstName: true, lastName: true, fullName: true, studentCode: true, section: true, accessCode: true },
+    select: { id: true, firstName: true, lastName: true, fullName: true, studentCode: true, section: true, accessCode: true, seatNo: true },
   });
   const sections = [...new Set(students.map((s) => s.section!))].sort();
   return res.json({
@@ -20,10 +20,10 @@ export async function getRoster(_req: Request, res: Response) {
       name,
       students: students
         .filter((s) => s.section === name)
-        .sort(byThaiName)
+        .sort(bySeat)
         .map((s, i) => ({
           id: s.id,
-          seatNumber: i + 1,
+          seatNumber: s.seatNo ?? i + 1,
           studentCode: s.studentCode,
           fullName: s.fullName,
           accessCode: s.accessCode,

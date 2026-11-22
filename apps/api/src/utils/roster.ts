@@ -26,3 +26,16 @@ const thai = new Intl.Collator("th");
 export function byThaiName<T extends { firstName: string; lastName: string }>(a: T, b: T) {
   return thai.compare(a.firstName, b.firstName) || thai.compare(a.lastName, b.lastName);
 }
+
+/**
+ * Class-list order used for seat numbers: rooms imported with the university's
+ * "เลขที่" (User.seatNo) keep that order; every other room stays ก–ฮ.
+ */
+export function bySeat<T extends { firstName: string; lastName: string; seatNo?: number | null }>(a: T, b: T) {
+  const sa = a.seatNo ?? null;
+  const sb = b.seatNo ?? null;
+  if (sa !== null && sb !== null && sa !== sb) return sa - sb;
+  if (sa !== null && sb === null) return -1;
+  if (sa === null && sb !== null) return 1;
+  return byThaiName(a, b);
+}
